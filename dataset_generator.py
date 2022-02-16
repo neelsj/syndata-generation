@@ -13,6 +13,10 @@ from multiprocessing import Pool
 from functools import partial
 import signal
 import time
+import json
+from datetime import datetime
+import csv
+import shutil 
 
 from defaults import *
 sys.path.insert(0, POISSON_BLENDING_DIR)
@@ -56,7 +60,7 @@ def LinearMotionBlur3C(img):
     lineType = lineTypes[lineTypeIdx]
     lineAngle = randomAngle(lineLength)
     blurred_img = img
-    for i in xrange(3):
+    for i in range(3):
         blurred_img[:,:,i] = PIL2array1C(LinearMotionBlur(img[:,:,i], lineLength, lineAngle, lineType))
     blurred_img = Image.fromarray(blurred_img, 'RGB')
     return blurred_img
@@ -92,9 +96,11 @@ def get_list_of_images(root_dir, N=1):
     Returns:
         list: List of images(with paths) that will be put in the dataset
     '''
-    img_list = glob.glob(os.path.join(root_dir, '*/*.jpg'))
+    img_list = glob.glob(os.path.join(root_dir, '*/*_mask.jpg'))
+    img_list = [img.replace("_mask", "") for img in img_list]
+
     img_list_f = []
-    for i in xrange(N):
+    for i in range(N):
         img_list_f = img_list_f + random.sample(img_list, len(img_list))
     return img_list_f
 
@@ -109,7 +115,7 @@ def get_mask_file(img_file):
     Returns:
         string: Correpsonding mask file path
     '''
-    mask_file = img_file.replace('.jpg','.pbm')
+    mask_file = img_file.replace('.jpg','_mask.jpg')
     return mask_file
 
 def get_labels(imgs):
@@ -122,7 +128,8 @@ def get_labels(imgs):
         list: List of labels/object names corresponding to each image
     '''
     labels = []
-    for img_file in imgs:
+    for img_file in imgs:        
+        img_file = img_file.replace("\\", "/")
         label = img_file.split('/')[-2]
         labels.append(label)
     return labels
@@ -148,7 +155,7 @@ def get_annotation_from_mask_file(mask_file, scale=1.0):
         else:
             return -1, -1, -1, -1
     else:
-        print "%s not found. Using empty mask instead."%mask_file
+        print ("%s not found. Using empty mask instead." % mask_file)
         return -1, -1, -1, -1
 
 def get_annotation_from_mask(mask):
@@ -179,7 +186,7 @@ def write_imageset_file(exp_dir, img_files, anno_files):
         anno_files(list): List of annotation files corresponding to each image file
     '''
     with open(os.path.join(exp_dir,'train.txt'),'w') as f:
-        for i in xrange(len(img_files)):
+        for i in range(len(img_files)):
             f.write('%s %s\n'%(img_files[i], anno_files[i]))
 
 def write_labels_file(exp_dir, labels):
@@ -193,7 +200,7 @@ def write_labels_file(exp_dir, labels):
     unique_labels = ['__background__'] + sorted(set(labels))
     with open(os.path.join(exp_dir,'labels.txt'),'w') as f:
         for i, label in enumerate(unique_labels):
-            f.write('%s %s\n'%(i, label))
+            f.write('%s\t%s\n'%(i, label))
 
 def keep_selected_labels(img_files, labels):
     '''Filters image files and labels to only retain those that are selected. Useful when one doesn't 
@@ -210,7 +217,7 @@ def keep_selected_labels(img_files, labels):
         selected_labels = [x.strip() for x in f.readlines()]
     new_img_files = []
     new_labels = []
-    for i in xrange(len(img_files)):
+    for i in range(len(img_files)):
         if labels[i] in selected_labels:
             new_img_files.append(img_files[i])
             new_labels.append(labels[i])
@@ -243,6 +250,26 @@ def create_image_anno_wrapper(args, w=WIDTH, h=HEIGHT, scale_augment=False, rota
    '''
    return create_image_anno(*args, w=w, h=h, scale_augment=scale_augment, rotation_augment=rotation_augment, blending_list=blending_list, dontocclude=dontocclude)
 
+def crop_resize(im, desired_size):
+    old_size = im.size  # old_size[0] is in (width, height) format
+
+    ratio = max(desired_size)/min(old_size)
+    new_size = tuple([int(x*ratio) for x in old_size])
+    # use thumbnail() or resize() method to resize the input image
+
+    # thumbnail is a in-place operation
+
+    # im.thumbnail(new_size, Image.ANTIALIAS)
+
+    im = im.resize(new_size, Image.ANTIALIAS)
+    # create a new image and paste the resized on it
+
+    new_im = Image.new("RGB", (desired_size[0], desired_size[1]))
+    new_im.paste(im, ((desired_size[0]-new_size[0])//2,
+                        (desired_size[1]-new_size[1])//2))
+
+    return new_im
+
 def create_image_anno(objects, distractor_objects, img_file, anno_file, bg_file,  w=WIDTH, h=HEIGHT, scale_augment=False, rotation_augment=False, blending_list=['none'], dontocclude=False):
     '''Add data augmentation, synthesizes images and generates annotations according to given parameters
 
@@ -259,25 +286,32 @@ def create_image_anno(objects, distractor_objects, img_file, anno_file, bg_file,
         blending_list(list): List of blending modes to synthesize for each image
         dontocclude(bool): Generate images with occlusion
     '''
-    if 'none' not in img_file:
-        return 
+    #if 'none' not in img_file:
+    #    return 
     
-    print "Working on %s" % img_file
+    print ("Working on %s" % img_file)
     if os.path.exists(anno_file):
         return anno_file
     
     all_objects = objects + distractor_objects
     assert len(all_objects) > 0
+    attempt = 0
     while True:
         top = Element('annotation')
         background = Image.open(bg_file)
-        background = background.resize((w, h), Image.ANTIALIAS)
+        #background = background.resize((w, h), Image.ANTIALIAS)
+
+        background = crop_resize(background, (w, h))
+
         backgrounds = []
-        for i in xrange(len(blending_list)):
+        for i in range(len(blending_list)):
             backgrounds.append(background.copy())
         
         if dontocclude:
             already_syn = []
+
+        rendered = False
+
         for idx, obj in enumerate(all_objects):
            foreground = Image.open(obj[0])
            xmin, xmax, ymin, ymax = get_annotation_from_mask_file(get_mask_file(obj[0]))
@@ -291,16 +325,19 @@ def create_image_anno(objects, distractor_objects, img_file, anno_file, bg_file,
            if INVERTED_MASK:
                mask = Image.fromarray(255-PIL2array1C(mask)).convert('1')
            o_w, o_h = orig_w, orig_h
+
+           additional_scale = min(w/o_w,h/o_h)
+
            if scale_augment:
                 while True:
-                    scale = random.uniform(MIN_SCALE, MAX_SCALE)
+                    scale = random.uniform(MIN_SCALE, MAX_SCALE)*additional_scale
                     o_w, o_h = int(scale*orig_w), int(scale*orig_h)
                     if  w-o_w > 0 and h-o_h > 0 and o_w > 0 and o_h > 0:
                         break
                 foreground = foreground.resize((o_w, o_h), Image.ANTIALIAS)
                 mask = mask.resize((o_w, o_h), Image.ANTIALIAS)
            if rotation_augment:
-               max_degrees = MAX_DEGREES  
+               max_degrees = MAX_DEGREES 
                while True:
                    rot_degrees = random.randint(-max_degrees, max_degrees)
                    foreground_tmp = foreground.rotate(rot_degrees, expand=True)
@@ -332,7 +369,8 @@ def create_image_anno(objects, distractor_objects, img_file, anno_file, bg_file,
                    break
            if dontocclude:
                already_syn.append([x+xmin, x+xmax, y+ymin, y+ymax])
-           for i in xrange(len(blending_list)):
+
+           for i in range(len(blending_list)):
                if blending_list[i] == 'none' or blending_list[i] == 'motion':
                    backgrounds[i].paste(foreground, (x, y), mask)
                elif blending_list[i] == 'poisson':
@@ -367,19 +405,24 @@ def create_image_anno(objects, distractor_objects, img_file, anno_file, bg_file,
            y_max_entry.text = '%d'%(min(h,y+ymax))
            difficult_entry = SubElement(object_root, 'difficult')
            difficult_entry.text = '0' # Add heuristic to estimate difficulty later on
+
+           rendered = True
+
         if attempt == MAX_ATTEMPTS_TO_SYNTHESIZE:
            continue
         else:
            break
-    for i in xrange(len(blending_list)):
-        if blending_list[i] == 'motion':
-            backgrounds[i] = LinearMotionBlur3C(PIL2array3C(backgrounds[i]))
-        backgrounds[i].save(img_file.replace('none', blending_list[i]))
 
-    xmlstr = xml.dom.minidom.parseString(tostring(top)).toprettyxml(indent="    ")
-    with open(anno_file, "w") as f:
-        f.write(xmlstr)
-   
+    if (rendered):
+        for i in range(len(blending_list)):
+            if blending_list[i] == 'motion':
+                backgrounds[i] = LinearMotionBlur3C(PIL2array3C(backgrounds[i]))
+            backgrounds[i].save(img_file.replace('none', blending_list[i]))
+
+        xmlstr = xml.dom.minidom.parseString(tostring(top)).toprettyxml(indent="    ")
+        with open(anno_file, "w") as f:
+            f.write(xmlstr)
+
 def gen_syn_data(img_files, labels, img_dir, anno_dir, scale_augment, rotation_augment, dontocclude, add_distractors):
     '''Creates list of objects and distrctor objects to be pasted on what images.
        Spawns worker processes and generates images according to given params
@@ -399,9 +442,11 @@ def gen_syn_data(img_files, labels, img_dir, anno_dir, scale_augment, rotation_a
     background_dir = BACKGROUND_DIR
     background_files = glob.glob(os.path.join(background_dir, BACKGROUND_GLOB_STRING))
    
-    print "Number of background images : %s"%len(background_files) 
-    img_labels = zip(img_files, labels)
+    print ("Number of background images : %s" % len(background_files))
+    img_labels = list(zip(img_files, labels))
     random.shuffle(img_labels)
+
+    print ("Number of images : %s" % len(img_labels))
 
     if add_distractors:
         with open(DISTRACTOR_LIST_FILE) as f:
@@ -411,34 +456,41 @@ def gen_syn_data(img_files, labels, img_dir, anno_dir, scale_augment, rotation_a
         for distractor_label in distractor_labels:
             distractor_list += glob.glob(os.path.join(DISTRACTOR_DIR, distractor_label, DISTRACTOR_GLOB_STRING))
 
-        distractor_files = zip(distractor_list, len(distractor_list)*[None])
+        distractor_files = list(zip(distractor_list, len(distractor_list)*[None]))
         random.shuffle(distractor_files)
+
+        print ("List of distractor files collected: %s" % distractor_files)
     else:
         distractor_files = []
-    print "List of distractor files collected: %s" % distractor_files
 
     idx = 0
     img_files = []
     anno_files = []
     params_list = []
+
+    images = []
+    image_id = 1    
+
+    annotations = []
+
     while len(img_labels) > 0:
         # Get list of objects
         objects = []
         n = min(random.randint(MIN_NO_OF_OBJECTS, MAX_NO_OF_OBJECTS), len(img_labels))
-        for i in xrange(n):
+        for i in range(n):
             objects.append(img_labels.pop())
         # Get list of distractor objects 
         distractor_objects = []
         if add_distractors:
             n = min(random.randint(MIN_NO_OF_DISTRACTOR_OBJECTS, MAX_NO_OF_DISTRACTOR_OBJECTS), len(distractor_files))
-            for i in xrange(n):
+            for i in range(n):
                 distractor_objects.append(random.choice(distractor_files))
-            print "Chosen distractor objects: %s" % distractor_objects
+            print ("Chosen distractor objects: %s" % distractor_objects)
 
         idx += 1
         bg_file = random.choice(background_files)
         for blur in BLENDING_LIST:
-            img_file = os.path.join(img_dir, '%i_%s.jpg'%(idx,blur))
+            img_file = os.path.join(img_dir, '%i_%s-%s.jpg'%(idx,blur, os.path.splitext(os.path.basename(bg_file))[0]))
             anno_file = os.path.join(anno_dir, '%i.xml'%idx)
             params = (objects, distractor_objects, img_file, anno_file, bg_file)
             params_list.append(params)
@@ -446,15 +498,21 @@ def gen_syn_data(img_files, labels, img_dir, anno_dir, scale_augment, rotation_a
             anno_files.append(anno_file)
 
     partial_func = partial(create_image_anno_wrapper, w=w, h=h, scale_augment=scale_augment, rotation_augment=rotation_augment, blending_list=BLENDING_LIST, dontocclude=dontocclude) 
-    p = Pool(NUMBER_OF_WORKERS, init_worker)
-    try:
-        p.map(partial_func, params_list)
-    except KeyboardInterrupt:
-        print "....\nCaught KeyboardInterrupt, terminating workers"
-        p.terminate()
+
+    if (NUMBER_OF_WORKERS>1):
+        p = Pool(NUMBER_OF_WORKERS, init_worker)
+        try:
+            p.map(partial_func, params_list)
+        except KeyboardInterrupt:
+            print ("....\nCaught KeyboardInterrupt, terminating workers")
+            p.terminate()
+        else:
+            p.close()
+        p.join()
     else:
-        p.close()
-    p.join()
+        for object in params_list:
+            create_image_anno_wrapper(object, w=w, h=h, scale_augment=scale_augment, rotation_augment=rotation_augment, blending_list=BLENDING_LIST, dontocclude=dontocclude)
+
     return img_files, anno_files
 
 def init_worker():
@@ -485,7 +543,136 @@ def generate_synthetic_dataset(args):
         os.makedirs(img_dir)
     
     syn_img_files, anno_files = gen_syn_data(img_files, labels, img_dir, anno_dir, args.scale, args.rotation, args.dontocclude, args.add_distractors)
-    write_imageset_file(args.exp, syn_img_files, anno_files)
+    write_imageset_file(args.exp, syn_img_files, anno_files)    
+
+import xml.etree.ElementTree as ET
+
+def createCocoJSONFromXML(path):
+
+    in_path = os.path.join(path, "images")
+
+    labels_file = os.path.join(path, "labels.txt")
+    labels_to_id = {}
+
+    with open(labels_file, newline='') as csvfile:
+        reader = csv.reader(csvfile, delimiter = "\t")
+            
+        class_list = []
+
+        for row in reader:
+            labels_to_id[row[1]] = row[0]
+
+    print(labels_to_id)
+
+    categories = list(labels_to_id.keys())
+
+    fileNameToCocoID = {}
+
+    file_list = [f for f in os.listdir(in_path) if os.path.splitext(f)[1] == ".jpg"]
+
+    image_id = 1
+    annotation_id = 1
+    
+    images = []
+    annotations = []
+
+    for f in file_list:
+
+        #image
+        file_path = os.path.join(in_path, f)    
+        image = Image.open(file_path)
+        print(file_path)
+
+        img_size = image.size    
+        new_img={}
+        new_img["license"] = 0
+        new_img["file_name"] = f
+        new_img["width"] = img_size[0]
+        new_img["height"] = img_size[1]
+        new_img["id"] = image_id
+        images.append(new_img)
+        
+        dir_path, file_name = os.path.split(file_path)
+        dir_path = dir_path.replace("images", "annotations")
+        file_name = file_name.split("_")[0] + ".xml"
+
+        xml_path = os.path.join(dir_path, file_name)
+       
+        tree = ET.parse(xml_path)
+        annotation = tree.getroot()
+
+        box = {}
+        for object in annotation:
+
+            category = object[0].text
+            category_id = labels_to_id[category]
+
+            box[object[1][0].tag] = int(object[1][0].text)
+            box[object[1][1].tag] = int(object[1][1].text)
+            box[object[1][2].tag] = int(object[1][2].text)
+            box[object[1][3].tag] = int(object[1][3].text)
+
+            annotation = {
+                'iscrowd': False,
+                'image_id': image_id,
+                'category_id': category_id,
+                'id': annotation_id,
+                'bbox': [box['xmin'], box['ymin'], box['xmax']-box['xmin'], box['ymax']-box['ymin']],
+                'area': (box['xmax']-box['xmin'])*(box['ymax']-box['ymin'])
+            }
+
+            annotations.append(annotation)
+            annotation_id += 1
+
+        image_id += 1
+
+    print("saving annotations to coco as json ")
+    ### create COCO JSON annotations
+    my_dict = {}
+    my_dict["info"]= COCO_INFO
+    my_dict["licenses"]= COCO_LICENSES
+    my_dict["images"]=images
+    my_dict["categories"]=categories
+    my_dict["annotations"]=annotations
+
+    # TODO: specify coco file locaiton 
+    output_file_path = os.path.join(in_path,"coco_instances.json")
+    with open(output_file_path, 'w+') as json_file:
+        json_file.write(json.dumps(my_dict))
+
+    print(">> complete. find coco json here: ", output_file_path)
+    print("last annotation id: ", annotation_id)
+    print("last image_id: ", image_id)
+
+def makeDirsFromXML(path):
+
+    in_path = os.path.join(path, "images")
+
+    file_list = [f for f in os.listdir(in_path) if os.path.splitext(f)[1] == ".jpg"]
+
+    for f in file_list:
+
+        #image
+        file_path = os.path.join(in_path, f)    
+        image = Image.open(file_path)
+        print(file_path)
+        
+        dir_path, file_name = os.path.split(file_path)
+        dir_path = dir_path.replace("images", "annotations")
+        xml_file_name = file_name.split("_")[0] + ".xml"
+
+        xml_path = os.path.join(dir_path, xml_file_name)
+       
+        tree = ET.parse(xml_path)
+        annotation = tree.getroot()
+
+        for object in annotation:
+            category = object[0].text
+        
+            path_category = os.path.join(path, "classes", category)
+            print(path_category)
+            os.makedirs(path_category, exist_ok=True)
+            shutil.copyfile(file_path, os.path.join(path_category, file_name))
 
 def parse_args():
     '''Parse input arguments
@@ -510,6 +697,25 @@ def parse_args():
     args = parser.parse_args()
     return args
 
+COCO_INFO = {
+    "description": "",
+    "url": "",
+    "version": "1",
+    "year": 2022,
+    "contributor": "MSR CV Group",
+    "date_created": datetime.now().strftime("%m/%d/%Y")
+}
+
+COCO_LICENSES = [{
+    "url": "",
+    "id": 0,
+    "name": "License"
+}]
+
 if __name__ == '__main__':
     args = parse_args()
-    generate_synthetic_dataset(args)
+    #from segment import generate_masks
+    #generate_masks(args.root)
+    #generate_synthetic_dataset(args)
+    createCocoJSONFromXML(args.exp)
+    makeDirsFromXML(args.exp)
