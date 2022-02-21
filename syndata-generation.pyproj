@@ -12,7 +12,7 @@
     <Name>syndata-generation</Name>
     <RootNamespace>syndata-generation</RootNamespace>
     <LaunchProvider>Standard Python launcher</LaunchProvider>
-    <CommandLineArguments>--num 270 --rotation --dontocclude E:/Source/EffortlessCV/data/objects/objects E:/Source/EffortlessCV/data/cut_paste2</CommandLineArguments>
+    <CommandLineArguments>--num 1 --rotation --dontocclude E:/Source/EffortlessCV/data/objects/objects E:/Source/EffortlessCV/data/cut_paste2</CommandLineArguments>
     <EnableNativeCodeDebugging>False</EnableNativeCodeDebugging>
     <InterpreterId>Global|VisualStudio|pytorch37</InterpreterId>
   </PropertyGroup>
@@ -27,7 +27,6 @@
   <ItemGroup>
     <Compile Include="dataset_generator.py" />
     <Compile Include="defaults.py" />
-    <Compile Include="defaults_template.py" />
     <Compile Include="segment.py" />
   </ItemGroup>
   <ItemGroup>
