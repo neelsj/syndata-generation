@@ -202,7 +202,7 @@ def write_labels_file(exp_dir, labels):
         for i, label in enumerate(unique_labels):
             f.write('%s\t%s\n'%(i, label))
 
-def keep_selected_labels(img_files, labels):
+def keep_selected_labels(img_files, labels, selected_list_file):
     '''Filters image files and labels to only retain those that are selected. Useful when one doesn't 
        want all objects to be used for synthesis
 
@@ -213,7 +213,7 @@ def keep_selected_labels(img_files, labels):
         new_image_files(list): Selected list of images
         new_labels(list): Selected list of labels corresponidng to each imahe in above list
     '''
-    with open(SELECTED_LIST_FILE) as f:
+    with open(selected_list_file) as f:
         selected_labels = [x.strip() for x in f.readlines()]
     new_img_files = []
     new_labels = []
@@ -287,9 +287,9 @@ def create_image_anno(objects, distractor_objects, img_file, anno_file, bg_file,
     if os.path.exists(anno_file):
         return anno_file
     
-    blending_list = args.BLENDING_LIST
-    w = args.WIDTH
-    h = args.HEIGHT
+    blending_list = args.blending_list
+    w = args.width
+    h = args.height
 
     all_objects = objects + distractor_objects
     assert len(all_objects) > 0
@@ -297,7 +297,7 @@ def create_image_anno(objects, distractor_objects, img_file, anno_file, bg_file,
     while True:
         top = Element('annotation')
         background = Image.open(bg_file)
-        background = crop_resize(background, (args.WIDTH, args.HEIGHT))
+        background = crop_resize(background, (w, h))
 
         backgrounds = []
         for i in range(len(blending_list)):
@@ -311,7 +311,7 @@ def create_image_anno(objects, distractor_objects, img_file, anno_file, bg_file,
         for idx, obj in enumerate(all_objects):
            foreground = Image.open(obj[0])
            xmin, xmax, ymin, ymax = get_annotation_from_mask_file(get_mask_file(obj[0]))
-           if xmin == -1 or ymin == -1 or xmax-xmin < args.MIN_WIDTH or ymax-ymin < args.MIN_HEIGHT :
+           if xmin == -1 or ymin == -1 or xmax-xmin < args.min_width or ymax-ymin < args.min_height :
                continue
            foreground = foreground.crop((xmin, ymin, xmax, ymax))
            orig_w, orig_h = foreground.size
@@ -326,14 +326,14 @@ def create_image_anno(objects, distractor_objects, img_file, anno_file, bg_file,
 
            if args.scale:
                 while True:
-                    scale = random.uniform(args.MIN_SCALE, args.MAX_SCALE)*additional_scale
+                    scale = random.uniform(args.min_scale, args.max_scale)*additional_scale
                     o_w, o_h = int(scale*orig_w), int(scale*orig_h)
                     if  w-o_w > 0 and h-o_h > 0 and o_w > 0 and o_h > 0:
                         break
                 foreground = foreground.resize((o_w, o_h), Image.ANTIALIAS)
                 mask = mask.resize((o_w, o_h), Image.ANTIALIAS)
            if args.rotation:
-               max_degrees = args.MAX_DEGREES 
+               max_degrees = args.max_degrees 
                while True:
                    rot_degrees = random.randint(-max_degrees, max_degrees)
                    foreground_tmp = foreground.rotate(rot_degrees, expand=True)
@@ -347,8 +347,8 @@ def create_image_anno(objects, distractor_objects, img_file, anno_file, bg_file,
            attempt = 0
            while True:
                attempt +=1
-               x = random.randint(int(-args.MAX_TRUNCATION_FRACTION*o_w), int(w-o_w+args.MAX_TRUNCATION_FRACTION*o_w))
-               y = random.randint(int(-args.MAX_TRUNCATION_FRACTION*o_h), int(h-o_h+args.MAX_TRUNCATION_FRACTION*o_h))
+               x = random.randint(int(-args.max_truncation_fraction*o_w), int(w-o_w+args.max_truncation_fraction*o_w))
+               y = random.randint(int(-args.max_truncation_fraction*o_h), int(h-o_h+args.max_truncation_fraction*o_h))
                if args.dontocclude:
                    found = True
                    for prev in already_syn:
@@ -430,9 +430,9 @@ def gen_syn_data(img_files, labels, img_dir, anno_dir, args):
         anno_dir(str): Directory where corresponding annotations will be stored
     '''
 
-    w = args.WIDTH
-    h = args.HEIGHT
-    background_dir = args.BACKGROUND_DIR
+    w = args.width
+    h = args.height
+    background_dir = args.background_dir
     background_files = glob.glob(os.path.join(background_dir, BACKGROUND_GLOB_STRING))
    
     print ("Number of background images : %s" % len(background_files))
@@ -442,12 +442,12 @@ def gen_syn_data(img_files, labels, img_dir, anno_dir, args):
     print ("Number of images : %s" % len(img_labels))
 
     if args.add_distractors:
-        with open(args.DISTRACTOR_LIST_FILE) as f:
+        with open(args.distractor_list_file) as f:
             distractor_labels = [x.strip() for x in f.readlines()]
 
         distractor_list = []
         for distractor_label in distractor_labels:
-            distractor_list += glob.glob(os.path.join(args.DISTRACTOR_DIR, distractor_label, DISTRACTOR_GLOB_STRING))
+            distractor_list += glob.glob(os.path.join(args.distractor_dir, distractor_label, DISTRACTOR_GLOB_STRING))
 
         distractor_list = [img.replace("_mask", "") for img in distractor_list]
 
@@ -471,20 +471,20 @@ def gen_syn_data(img_files, labels, img_dir, anno_dir, args):
     while len(img_labels) > 0:
         # Get list of objects
         objects = []
-        n = min(random.randint(args.MIN_NO_OF_OBJECTS, args.MAX_NO_OF_OBJECTS), len(img_labels))
+        n = min(random.randint(args.min_objects, args.max_objects), len(img_labels))
         for i in range(n):
             objects.append(img_labels.pop())
         # Get list of distractor objects 
         distractor_objects = []
         if args.add_distractors:
-            n = min(random.randint(args.MIN_NO_OF_DISTRACTOR_OBJECTS, args.MAX_NO_OF_DISTRACTOR_OBJECTS), len(distractor_files))
+            n = min(random.randint(args.min_distractor_objects, args.max_distractor_objects), len(distractor_files))
             for i in range(n):
                 distractor_objects.append(random.choice(distractor_files))
             print ("Chosen distractor objects: %s" % distractor_objects)
 
         idx += 1
         bg_file = random.choice(background_files)
-        for blur in args.BLENDING_LIST:
+        for blur in args.blending_list:
             img_file = os.path.join(img_dir, '%i_%s-%s.jpg'%(idx,blur, os.path.splitext(os.path.basename(bg_file))[0]))
             anno_file = os.path.join(anno_dir, '%i.xml'%idx)
             params = (objects, distractor_objects, img_file, anno_file, bg_file)
@@ -494,8 +494,8 @@ def gen_syn_data(img_files, labels, img_dir, anno_dir, args):
 
     partial_func = partial(create_image_anno_wrapper, args=args) 
 
-    if (args.NUMBER_OF_WORKERS>1):
-        p = Pool(args.NUMBER_OF_WORKERS, init_worker)
+    if (args.workers>1):
+        p = Pool(args.workers, init_worker)
         try:
             p.map(partial_func, params_list)
         except KeyboardInterrupt:
@@ -523,7 +523,7 @@ def generate_synthetic_dataset(args):
     labels = get_labels(img_files)
 
     if args.selected:
-       img_files, labels = keep_selected_labels(img_files, labels)
+       img_files, labels = keep_selected_labels(img_files, labels, args.selected_list_file)
 
     if not os.path.exists(args.exp):
         os.makedirs(args.exp)
@@ -673,10 +673,12 @@ def parse_args():
     '''Parse input arguments
     '''
     parser = argparse.ArgumentParser(description="Create dataset with different augmentations")
+
     parser.add_argument("root",
       help="The root directory which contains the images and annotations.")
     parser.add_argument("exp",
       help="The directory where images and annotation lists will be created.")
+
     parser.add_argument("--selected",
       help="Keep only selected instances in the test dataset. Default is to keep all instances in the root directory", action="store_true")
     parser.add_argument("--scale",
@@ -690,32 +692,35 @@ def parse_args():
     parser.add_argument("--add_distractors",
       help="Add distractors objects. Default is to not use distractors", action="store_true")
 
+    parser.add_argument("--create_masks",
+      help="Create object masks", action="store_true")
+
     # Paths
-    parser.add_argument('--BACKGROUND_DIR', default='E:/Source/EffortlessCV/data/office/', type=str)
-    parser.add_argument('--SELECTED_LIST_FILE', default='demo_data_dir/selected.txt', type=str)
-    parser.add_argument('--DISTRACTOR_LIST_FILE', default='demo_data_dir/neg_list.txt', type=str)
-    parser.add_argument('--DISTRACTOR_DIR', default='E:/Source/EffortlessCV/data/objects/', type=str)
+    parser.add_argument('--background_dir', default='E:/Source/EffortlessCV/data/office/', type=str)
+    parser.add_argument('--selected_list_file', default='demo_data_dir/selected.txt', type=str)
+    parser.add_argument('--distractor_list_file', default='demo_data_dir/neg_list.txt', type=str)
+    parser.add_argument('--distractor_dir', default='E:/Source/EffortlessCV/data/objects/', type=str)
 
     # Parameters for generator
-    parser.add_argument('--NUMBER_OF_WORKERS', default=10, type=int)
-    parser.add_argument("--BLENDING_LIST", nargs="+", default=['gaussian']) # can be ['gaussian','poisson', 'none', 'box', 'motion']
+    parser.add_argument('--workers', default=10, type=int)
+    parser.add_argument("--blending_list", nargs="+", default=['gaussian']) # can be ['gaussian','poisson', 'none', 'box', 'motion']
 
     # Parameters for images
-    parser.add_argument('--MIN_NO_OF_OBJECTS', default=1, type=int)
-    parser.add_argument('--MAX_NO_OF_OBJECTS', default=1, type=int)
-    parser.add_argument('--MIN_NO_OF_DISTRACTOR_OBJECTS', default=1, type=int)
-    parser.add_argument('--MAX_NO_OF_DISTRACTOR_OBJECTS', default=1, type=int)
-    parser.add_argument('--WIDTH', default=640, type=int)
-    parser.add_argument('--HEIGHT', default=480, type=int)
+    parser.add_argument('--min_objects', default=1, type=int)
+    parser.add_argument('--max_objects', default=1, type=int)
+    parser.add_argument('--min_distractor_objects', default=1, type=int)
+    parser.add_argument('--max_distractor_objects', default=1, type=int)
+    parser.add_argument('--width', default=640, type=int)
+    parser.add_argument('--height', default=480, type=int)
 
     # Parameters for objects in images
-    parser.add_argument('--MIN_SCALE', default=.8, type=float) # min scale for scale augmentation
-    parser.add_argument('--MAX_SCALE', default=1.5, type=float) # max scale for scale augmentation
-    parser.add_argument('--MAX_DEGREES', default=5, type=float) # max rotation allowed during rotation augmentation
-    parser.add_argument('--MAX_TRUNCATION_FRACTION', default=0, type=float) # max fraction to be truncated = MAX_TRUNCACTION_FRACTION*(WIDTH/HEIGHT)
-    parser.add_argument('--MAX_ALLOWED_IOU', default=.75, type=float) # IOU > MAX_ALLOWED_IOU is considered an occlusion
-    parser.add_argument('--MIN_WIDTH', default=100, type=int) # Minimum width of object to use for data generation
-    parser.add_argument('--MIN_HEIGHT', default=100, type=int) # Minimum height of object to use for data generation
+    parser.add_argument('--min_scale', default=.8, type=float) # min scale for scale augmentation
+    parser.add_argument('--max_scale', default=1.5, type=float) # max scale for scale augmentation
+    parser.add_argument('--max_degrees', default=5, type=float) # max rotation allowed during rotation augmentation
+    parser.add_argument('--max_truncation_fraction', default=0, type=float) # max fraction to be truncated = MAX_TRUNCACTION_FRACTION*(WIDTH/HEIGHT)
+    parser.add_argument('--max_allowed_iou', default=.75, type=float) # IOU > MAX_ALLOWED_IOU is considered an occlusion
+    parser.add_argument('--min_width', default=100, type=int) # Minimum width of object to use for data generation
+    parser.add_argument('--min_height', default=100, type=int) # Minimum height of object to use for data generation
 
     args = parser.parse_args()
     return args
@@ -738,8 +743,9 @@ COCO_LICENSES = [{
 if __name__ == '__main__':
     args = parse_args()
         
-    #from segment import generate_masks
-    #generate_masks(args.root)
+    if (args.create_masks):
+        from segment import generate_masks
+        generate_masks(args.root)
 
     generate_synthetic_dataset(args)
 
