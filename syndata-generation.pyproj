@@ -12,9 +12,9 @@
     <Name>syndata-generation</Name>
     <RootNamespace>syndata-generation</RootNamespace>
     <LaunchProvider>Standard Python launcher</LaunchProvider>
-    <CommandLineArguments>--num 10 --rotation --dontocclude E:/Source/EffortlessCV/data/surface/test E:/Source/EffortlessCV/data/surface_cut_paste_10/test</CommandLineArguments>
+    <CommandLineArguments>--num 270 --rotation --dontocclude E:/Source/EffortlessCV/data/objects/objects E:/Source/EffortlessCV/data/cut_paste2</CommandLineArguments>
     <EnableNativeCodeDebugging>False</EnableNativeCodeDebugging>
-    <InterpreterId>CondaEnv|CondaEnv|pytorch37</InterpreterId>
+    <InterpreterId>Global|VisualStudio|pytorch37</InterpreterId>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
     <DebugSymbols>true</DebugSymbols>
@@ -31,7 +31,7 @@
     <Compile Include="segment.py" />
   </ItemGroup>
   <ItemGroup>
-    <InterpreterReference Include="CondaEnv|CondaEnv|pytorch37" />
+    <InterpreterReference Include="Global|VisualStudio|pytorch37" />
   </ItemGroup>
   <Import Project="$(MSBuildExtensionsPath32)\Microsoft\VisualStudio\v$(VisualStudioVersion)\Python Tools\Microsoft.PythonTools.targets" />
   <!-- Uncomment the CoreCompile target to enable the Build command in

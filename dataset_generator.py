@@ -96,7 +96,7 @@ def get_list_of_images(root_dir, N=1):
     Returns:
         list: List of images(with paths) that will be put in the dataset
     '''
-    img_list = glob.glob(os.path.join(root_dir, '*/*_mask.jpg'))
+    img_list = glob.glob(os.path.join(root_dir, '*_mask.jpg'))
     img_list = [img.replace("_mask", "") for img in img_list]
 
     img_list_f = []
@@ -456,6 +456,8 @@ def gen_syn_data(img_files, labels, img_dir, anno_dir, scale_augment, rotation_a
         for distractor_label in distractor_labels:
             distractor_list += glob.glob(os.path.join(DISTRACTOR_DIR, distractor_label, DISTRACTOR_GLOB_STRING))
 
+        distractor_list = [img.replace("_mask", "") for img in distractor_list]
+
         distractor_files = list(zip(distractor_list, len(distractor_list)*[None]))
         random.shuffle(distractor_files)
 
@@ -714,8 +716,11 @@ COCO_LICENSES = [{
 
 if __name__ == '__main__':
     args = parse_args()
+        
     #from segment import generate_masks
     #generate_masks(args.root)
-    #generate_synthetic_dataset(args)
-    createCocoJSONFromXML(args.exp)
-    makeDirsFromXML(args.exp)
+
+    generate_synthetic_dataset(args)
+
+    ##createCocoJSONFromXML(train_path_exp)
+    ##makeDirsFromXML(train_path_exp)
