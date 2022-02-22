@@ -12,7 +12,7 @@
     <Name>syndata-generation</Name>
     <RootNamespace>syndata-generation</RootNamespace>
     <LaunchProvider>Standard Python launcher</LaunchProvider>
-    <CommandLineArguments>--num 1 --rotation --dontocclude E:/Source/EffortlessCV/data/objects E:/Source/EffortlessCV/data/cut_paste --add_backgroud_distractors</CommandLineArguments>
+    <CommandLineArguments>--total_num 1000 --rotation --dontocclude E:/Source/EffortlessCV/data/objects E:/Source/EffortlessCV/data/cut_paste --add_backgroud_distractors</CommandLineArguments>
     <EnableNativeCodeDebugging>False</EnableNativeCodeDebugging>
     <InterpreterId>Global|VisualStudio|pytorch37</InterpreterId>
   </PropertyGroup>
