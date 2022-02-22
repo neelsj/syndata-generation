@@ -22,7 +22,7 @@ from defaults import *
 sys.path.insert(0, POISSON_BLENDING_DIR)
 from pb import *
 import math
-from pyblur import *
+from pyblur3 import *
 from collections import namedtuple
 
 Rectangle = namedtuple('Rectangle', 'xmin ymin xmax ymax')
@@ -411,31 +411,26 @@ def gen_syn_data(img_files, labels, args):
     h = args.height   
     background_files = glob.glob(os.path.join(args.background_dir, '*/*.jpg'))    
 
-    print ("Number of background images : %s" % len(background_files))
+    print ("Number of background images : %d" % len(background_files))
 
     img_labels = list(zip(img_files, labels))
     random.shuffle(img_labels)
-
-    print ("Number of images : %s" % len(img_labels))
 
     if (args.add_distractors or args.add_backgroud_distractors):
         distractor_list = get_list_of_images(args.distractor_dir) 
         distractor_labels = get_labels(distractor_list)
         distractor_files = list(zip(distractor_list, distractor_labels))
 
-        print ("Number of distractor images : %s" % len(distractor_files))        
+        print ("Number of distractor images : %d" % len(distractor_files))        
     else:
         distractor_files = []
+
+    print ("Generating number of images : %d" % len(img_labels))
 
     idx = 0
     img_files = []
     anno_files = []
     params_list = []
-
-    images = []
-    image_id = 1    
-
-    annotations = []
 
     while len(img_labels) > 0:
         # Get list of objects
@@ -449,15 +444,15 @@ def gen_syn_data(img_files, labels, args):
             n = min(random.randint(args.min_distractor_objects, args.max_distractor_objects), len(distractor_files))
             for i in range(n):
                 distractor_objects.append(random.choice(distractor_files))
-            print ("Chosen distractor objects: %s" % distractor_objects)
-
-        idx += 1
+            #print ("Chosen distractor objects: %s" % distractor_objects)
+        
         bg_file = random.choice(background_files)
         for blur in args.blending_list:
-            img_file = 'images/%i_%s-%s.jpg'%(idx,blur, os.path.splitext(os.path.basename(bg_file))[0])
+            img_file = '%i_%s-%s.jpg'%(idx,blur, os.path.splitext(os.path.basename(bg_file))[0])
             params = (objects, distractor_objects, img_file, bg_file, idx)
             params_list.append(params)
             img_files.append(img_file)
+        idx += 1
 
     partial_func = partial(create_image_anno_wrapper, args=args) 
 
@@ -501,14 +496,15 @@ def generate_synthetic_dataset(args):
     for i in range(N):
         img_files = img_files + random.sample(img_list, len(img_list))
 
+    img_files = random.sample(img_files, args.total_num)
+
     labels = get_labels(img_files)
 
     if not os.path.exists(args.exp):
         os.makedirs(args.exp)   
     
-    img_dir = os.path.join(args.exp, 'images')
-    if not os.path.exists(os.path.join(img_dir)):
-        os.makedirs(img_dir)
+    if not os.path.exists(args.exp):
+        os.makedirs(args.exp)
     
     results = gen_syn_data(img_files, labels, args)  
 
@@ -549,36 +545,6 @@ def generate_synthetic_dataset(args):
 
     print(">> complete. find coco json here: ", output_file_path)
 
-def makeDirsFromXML(path):
-
-    in_path = os.path.join(path, "images")
-
-    file_list = [f for f in os.listdir(in_path) if os.path.splitext(f)[1] == ".jpg"]
-
-    for f in file_list:
-
-        #image
-        file_path = os.path.join(in_path, f)    
-        image = Image.open(file_path)
-        print(file_path)
-        
-        dir_path, file_name = os.path.split(file_path)
-        dir_path = dir_path.replace("images", "annotations")
-        xml_file_name = file_name.split("_")[0] + ".xml"
-
-        xml_path = os.path.join(dir_path, xml_file_name)
-       
-        tree = ET.parse(xml_path)
-        annotation = tree.getroot()
-
-        for object in annotation:
-            category = object[0].text
-        
-            path_category = os.path.join(path, "classes", category)
-            print(path_category)
-            os.makedirs(path_category, exist_ok=True)
-            shutil.copyfile(file_path, os.path.join(path_category, file_name))
-
 def parse_args():
     '''Parse input arguments
     '''
@@ -586,9 +552,9 @@ def parse_args():
 
     parser.add_argument("root",
       help="The root directory which contains the images and annotations.")
-    parser.add_argument("exp",
+    parser.add_argument("--exp",
       help="The directory where images and annotation lists will be created.")
-
+    
     parser.add_argument("--scale",
       help="Add scale augmentation.Default is to add scale augmentation.", action="store_false")
     parser.add_argument("--rotation",
@@ -614,8 +580,8 @@ def parse_args():
     parser.add_argument("--blending_list", nargs="+", default=['gaussian']) # can be ['gaussian','poisson', 'none', 'box', 'motion']
 
     # Parameters for images
-    parser.add_argument('--min_objects', default=5, type=int)
-    parser.add_argument('--max_objects', default=5, type=int)
+    parser.add_argument('--min_objects', default=1, type=int)
+    parser.add_argument('--max_objects', default=1, type=int)
     parser.add_argument('--min_distractor_objects', default=0, type=int)
     parser.add_argument('--max_distractor_objects', default=2, type=int)
     parser.add_argument('--width', default=640, type=int)
@@ -658,6 +624,3 @@ if __name__ == '__main__':
         generate_masks(args.root)
 
     generate_synthetic_dataset(args)
-
-    ##createCocoJSONFromXML(train_path_exp)
-    ##makeDirsFromXML(train_path_exp)
