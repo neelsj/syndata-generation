@@ -12,8 +12,7 @@
     <Name>syndata-generation</Name>
     <RootNamespace>syndata-generation</RootNamespace>
     <LaunchProvider>Standard Python launcher</LaunchProvider>
-    <CommandLineArguments>../EffortlessCVData/objects --background_dir ../EffortlessCVData/office --exp ../EffortlessCVData/train_cut_paste_clutter_more/person 
---distractor_dir ../EffortlessCVData/distractors --add_backgroud_distractors --dontocclude --total_num 100000</CommandLineArguments>
+    <CommandLineArguments>E:/Source/EffortlessCVData/planes/objects_benchmark_recognition --create_json</CommandLineArguments>
     <EnableNativeCodeDebugging>False</EnableNativeCodeDebugging>
     <InterpreterId>Global|VisualStudio|pytorch37</InterpreterId>
   </PropertyGroup>
@@ -26,6 +25,9 @@
     <EnableUnmanagedDebugging>false</EnableUnmanagedDebugging>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="cocosplit.py">
+      <SubType>Code</SubType>
+    </Compile>
     <Compile Include="dataset_generator.py" />
     <Compile Include="defaults.py" />
     <Compile Include="segment.py" />

@@ -9,7 +9,10 @@ import numpy as np
 import random
 from PIL import Image
 import scipy
+
 from multiprocessing import Pool
+from multiprocessing import get_context
+
 from functools import partial
 import signal
 import time
@@ -24,6 +27,9 @@ from pb import *
 import math
 from pyblur3 import *
 from collections import namedtuple
+
+import csv
+from pycocotools.coco import COCO
 
 Rectangle = namedtuple('Rectangle', 'xmin ymin xmax ymax')
 
@@ -97,6 +103,10 @@ def get_list_of_images(root_dir):
         list: List of images(with paths) that will be put in the dataset
     '''
     img_list = glob.glob(os.path.join(root_dir, '*/*_mask.jpg'))
+
+    if (len(img_list) == 0):
+        img_list = glob.glob(os.path.join(root_dir, '*/*.jpg'))
+
     img_list = [img.replace("_mask", "") for img in img_list]
 
     return img_list
@@ -272,9 +282,9 @@ def render_objects(backgrounds, all_objects, min_scale, max_scale, args, already
                     mask = mask_tmp
                     foreground = foreground_tmp
                     break
-            if attempt_rotation == MAX_ATTEMPTS_TO_SYNTHESIZE:
-                o_w, o_h = foreground.size
-                break  
+                if attempt_rotation == MAX_ATTEMPTS_TO_SYNTHESIZE:
+                    o_w, o_h = foreground.size
+                    break  
         xmin, xmax, ymin, ymax = get_annotation_from_mask(mask)
         attempt_place = 0
         while True:
@@ -354,6 +364,9 @@ def create_image_anno(objects, distractor_objects, img_file, bg_file, image_id, 
     #if 'none' not in img_file:
     #    return 
     
+    if (args.one_type_per_image):
+        img_file = os.path.join(objects[0][1], img_file)
+
     print ("Working on %s" % img_file)
 
     blending_list = args.blending_list
@@ -365,11 +378,6 @@ def create_image_anno(objects, distractor_objects, img_file, bg_file, image_id, 
     annotations = []
 
     img_info = {}
-    img_info["license"] = 0
-    img_info["file_name"] = img_file
-    img_info["width"] = w
-    img_info["height"] = h
-    img_info["id"] = image_id
 
     background = Image.open(bg_file)
     background = crop_resize(background, (w, h))
@@ -381,15 +389,20 @@ def create_image_anno(objects, distractor_objects, img_file, bg_file, image_id, 
     if(args.add_backgroud_distractors and len(distractor_objects) > 0):
         rendered, _, _ = render_objects(backgrounds, distractor_objects, args.min_distractor_scale, args.max_distractor_scale, args)
 
-    if args.dontocclude:
-        already_syn = []
-
+    already_syn = []
     rendered, already_syn, annotations = render_objects(backgrounds, objects, args.min_scale, args.max_scale, args, already_syn, annotations, image_id)
 
     if (args.add_distractors and len(distractor_objects) > 0):
-        attempt, rendered, already_syn = render_objects(backgrounds, distractor_objects, already_syn, args.min_distractor_scale, args.max_distractor_scale, args, already_syn)
+        rendered, _, _ = render_objects(backgrounds, distractor_objects, args.min_distractor_scale, args.max_distractor_scale, args, already_syn)
 
     if (rendered):
+
+        img_info["license"] = 0
+        img_info["file_name"] = img_file
+        img_info["width"] = w
+        img_info["height"] = h
+        img_info["id"] = image_id
+
         img_file = os.path.join(args.exp, img_file)
         for i in range(len(blending_list)):
             if blending_list[i] == 'motion':
@@ -398,7 +411,7 @@ def create_image_anno(objects, distractor_objects, img_file, bg_file, image_id, 
 
     return img_info, annotations
 
-def gen_syn_data(img_files, labels, args):
+def gen_syn_data(args):
     '''Creates list of objects and distrctor objects to be pasted on what images.
        Spawns worker processes and generates images according to given params
 
@@ -409,12 +422,43 @@ def gen_syn_data(img_files, labels, args):
 
     w = args.width
     h = args.height   
+
+    img_list = get_list_of_images(args.root) 
+    labels = get_labels(img_list)
+    unique_labels = sorted(set(labels))
+
+    print ("Number of classes : %d" % len(unique_labels))
+    print ("Number of images : %d" % len(img_list))
+
+    img_files = list(zip(img_list, labels))
+
+    N = int(max(np.ceil(args.max_objects*args.total_num/len(img_files)), 1))
+
+    print("Objects will be used %d times" % N)
+
+    if(args.one_type_per_image):
+        img_by_labels = {}
+        img_labels = []
+        for l in unique_labels:
+            img_by_labels[l] = []
+            img_labels.append([])
+
+            if not os.path.exists(os.path.join(args.exp, l)):
+                os.makedirs(os.path.join(args.exp, l))
+
+        for img_file in img_files:
+            img_by_labels[img_file[1]].append(img_file)
+
+        for j, key in enumerate(img_by_labels.keys()):
+            for i in range(N):
+                img_labels[j] = img_labels[j] + random.sample(img_by_labels[key], len(img_by_labels[key]))
+    else:
+        img_labels = []
+        for i in range(N):
+            img_labels = img_labels + random.sample(img_files, len(img_files))
+
     background_files = glob.glob(os.path.join(args.background_dir, '*/*.jpg'))    
-
     print ("Number of background images : %d" % len(background_files))
-
-    img_labels = list(zip(img_files, labels))
-    random.shuffle(img_labels)
 
     if (args.add_distractors or args.add_backgroud_distractors):
         distractor_list = get_list_of_images(args.distractor_dir) 
@@ -425,19 +469,26 @@ def gen_syn_data(img_files, labels, args):
     else:
         distractor_files = []
 
-    print ("Generating number of images : %d" % len(img_labels))
-
     idx = 0
     img_files = []
     anno_files = []
     params_list = []
 
-    while len(img_labels) > 0:
+    while any(img_labels):
         # Get list of objects
         objects = []
         n = min(random.randint(args.min_objects, args.max_objects), len(img_labels))
-        for i in range(n):
-            objects.append(img_labels.pop())
+
+        if (args.one_type_per_image):
+            non_empty = [i for i in range(len(img_labels)) if len(img_labels[i])>0]
+            nn = random.randint(0, len(non_empty)-1)
+            nl = non_empty[nn]
+            for i in range(n):
+                objects.append(img_labels[nl].pop())
+        else:
+            for i in range(n):
+                objects.append(img_labels.pop())
+
         # Get list of distractor objects 
         distractor_objects = []
         if (args.add_distractors or args.add_backgroud_distractors):
@@ -454,10 +505,13 @@ def gen_syn_data(img_files, labels, args):
             img_files.append(img_file)
         idx += 1
 
+        if (idx >= args.total_num):
+            break
+
     partial_func = partial(create_image_anno_wrapper, args=args) 
 
     if (args.workers>1):
-        p = Pool(args.workers, init_worker)
+        p = get_context("spawn").Pool(args.workers, init_worker)
         try:
             results = p.map(partial_func, params_list)
         except KeyboardInterrupt:
@@ -472,7 +526,7 @@ def gen_syn_data(img_files, labels, args):
             img_info, annotations = create_image_anno_wrapper(object, args=args)
             results.append([img_info, annotations])
 
-    return results
+    return results, unique_labels
 
 def init_worker():
     '''
@@ -483,22 +537,6 @@ def init_worker():
 def generate_synthetic_dataset(args):
     ''' Generate synthetic dataset according to given args
     '''
-    img_list = get_list_of_images(args.root) 
-
-    if (args.total_num > 0):
-        N = int(np.ceil(args.total_num/len(img_list)))
-    else:
-        N = 1
-
-    print("Objects will be used %d times" % N)
-
-    img_files = []
-    for i in range(N):
-        img_files = img_files + random.sample(img_list, len(img_list))
-
-    img_files = random.sample(img_files, args.total_num)
-
-    labels = get_labels(img_files)
 
     if not os.path.exists(args.exp):
         os.makedirs(args.exp)   
@@ -506,9 +544,7 @@ def generate_synthetic_dataset(args):
     if not os.path.exists(args.exp):
         os.makedirs(args.exp)
     
-    results = gen_syn_data(img_files, labels, args)  
-
-    unique_labels = sorted(set(labels))
+    results, unique_labels = gen_syn_data(args)  
 
     categories = []
     label_to_id = {}
@@ -521,13 +557,15 @@ def generate_synthetic_dataset(args):
     annotations = []
     annotation_id = 0
     for img_info, img_annotations in results:
-        img_infos.append(img_info)
 
-        for img_annotation in img_annotations:
-            img_annotation["id"] = annotation_id
-            img_annotation["category_id"] = label_to_id[img_annotation["category_id"]]
-            annotation_id += 1
-            annotations.append(img_annotation)
+        if (img_info):
+            img_infos.append(img_info)
+
+            for img_annotation in img_annotations:
+                img_annotation["id"] = annotation_id
+                img_annotation["category_id"] = label_to_id[img_annotation["category_id"]]
+                annotation_id += 1
+                annotations.append(img_annotation)
 
     print("saving annotations to coco as json ")
     ### create COCO JSON annotations
@@ -544,6 +582,233 @@ def generate_synthetic_dataset(args):
         json_file.write(json.dumps(my_dict))
 
     print(">> complete. find coco json here: ", output_file_path)
+
+def coco_from_imagefolder(args):
+    
+    img_list = get_list_of_images(args.root) 
+    labels = get_labels(img_list)
+    class_list = sorted(set(labels))
+
+    print ("Number of classes : %d" % len(class_list))
+    print ("Number of images : %d" % len(img_list))
+
+    coco_json = {"info":COCO_INFO, "licenses": COCO_LICENSES, "images": [], "categories": [], "annotations": []}
+
+    label_to_id = {}
+
+    for j, cls in enumerate(class_list):
+        coco_json["categories"].append({"name": cls, "id": j})
+        label_to_id[cls] = j
+
+    for j, img_path_full in enumerate(img_list):
+        img_dir, img = os.path.split(img_path_full)   
+        cls = os.path.basename(img_dir)
+        img_path = os.path.join(cls, img)
+        cls_dir = os.path.join(args.root, cls)
+
+        print(img_path)        
+        w, h = Image.open(os.path.join(cls_dir, img)).size
+        coco_json["images"].append({"id": j, "file_name": img_path, "width": w, "height": h, "classes": [label_to_id[cls]]})
+
+    print("saving annotations to coco as json ")
+
+    output_file_path = os.path.join(args.root,"annotations.json")
+    with open(output_file_path, "w") as f:
+        json.dump(coco_json, f)
+
+    print(">> complete. find coco json here: ", output_file_path)
+
+def center_crop(img):
+    """Returns center cropped image
+    Args:
+    img: image to be center cropped
+    dim: dimensions (width, height) to be cropped
+    """
+    width, height = img.shape[1], img.shape[0]
+    sz = min(width, height)
+
+    # process crop width and height for max available dimension
+    crop_width = sz
+    crop_height = sz
+    mid_x, mid_y = int(width/2), int(height/2)
+    cw2, ch2 = int(crop_width/2), int(crop_height/2) 
+    crop_img = img[mid_y-ch2:mid_y+ch2, mid_x-cw2:mid_x+cw2]
+    return crop_img
+    
+def image_thumbnails(path, num_per_dir=1, thumbsize=128, max_w=8):
+    
+    thumbs_files = []
+
+    dirs = os.listdir(path)
+
+    if (os.path.isdir(os.path.join(path, dirs[0]))):
+
+        num_dirs = len(dirs)
+
+        if (num_per_dir*num_dirs < 8):
+            num_per_dir = int(8 / num_dirs)
+            print("num_per_dir %d" % num_per_dir)
+
+        # This would print all the files and directories
+        for dir in dirs:       
+            img_list = glob.glob(os.path.join(path, dir, '*_mask.jpg'))
+            img_list = [img.replace("_mask", "") for img in img_list]
+
+            if (len(img_list) == 0):
+                img_list = glob.glob(os.path.join(path, dir, '*.jpg'))
+
+            if (len(img_list) >=1 ):
+
+                for i in range(min(num_per_dir, len(img_list))):
+                    file = os.path.join(path, dir, img_list[i])
+                    thumbs_files.append(file)
+       
+    else:
+        img_list = dirs
+
+        ind = np.random.permutation(len(img_list))
+        ind = ind[0:100]
+
+        for i in ind:
+            file = os.path.join(path, img_list[i])
+            thumbs_files.append(file)
+
+    print(thumbs_files)
+
+    w = max_w
+    h = int(np.ceil(len(thumbs_files)/w))
+    collage = np.ones((thumbsize*h,thumbsize*w,3))
+
+    i = 0
+    while(thumbs_files):
+        thumbs_file = thumbs_files.pop(0).replace("\\", "/")
+        im = cv2.imread(thumbs_file)
+
+        if (im is not None):
+            im = center_crop(im)
+            im = cv2.resize(im, (thumbsize,thumbsize))
+
+            r = i//w
+            c = i - r*w
+            x = r*thumbsize
+            y = c*thumbsize   
+
+            collage[x:x+thumbsize,y:y+thumbsize,:] = im/255
+
+            #cv2.imshow("", collage)
+            #cv2.waitKey(0)
+
+            i += 1
+
+    cv2.imwrite(os.path.join(path, "collage.jpg"), np.uint8(collage*255))
+
+         
+def change_fgvc_classes(annotations_file_src, annotations_file_dst, annotations_file_out):
+ 
+    old_to_new_name = {}
+
+    with open("E:/Research/Images/FineGrained/fgvc-aircraft-2013b/data/manufacturers_variants.txt", newline='') as csvfile:
+        reader = csv.reader(csvfile, delimiter = '\t')            
+        for row in reader:
+            old_to_new_name[row[1]] = row[0] + " " + row[1].replace("/","-")
+
+    with open(annotations_file_src, 'rt', encoding='UTF-8') as annotations:
+        coco_src = json.load(annotations)        
+        images = coco_src['images']
+        annotation_srcs = coco_src['annotations']
+        categories_src = coco_src['categories']    
+
+    class_to_id = {}
+    for cls in categories_src:
+        class_to_id[cls["name"]] = cls["id"]
+
+    with open(annotations_file_dst, 'rt', encoding='UTF-8') as annotations:
+        coco_dst = json.load(annotations)        
+        images_dst = coco_dst['images']
+        annotations_dst = coco_dst['annotations']
+        categories_dst = coco_dst['categories']
+
+    old_to_new_id = {}
+
+    for class_old in categories_dst:
+        class_id_old = class_old["id"]
+        class_name_old = class_old["name"]
+        class_name_new = old_to_new_name[class_name_old]
+        class_id_new = class_to_id[class_name_new]
+
+        old_to_new_id[class_id_old] = class_id_new
+
+    for i in range(len(images_dst)):
+        classes = images_dst[i]["classes"]
+        classes_new = [old_to_new_id[class_id_old] for class_id_old in classes]
+        images_dst[i]["classes"] = classes_new
+
+    for i in range(len(annotations_dst)):
+        class_id_old = annotations_dst[i]["category_id"]
+        class_id_new = old_to_new_id[class_id_old]
+        annotations_dst[i]["category_id"] = class_id_new
+
+    coco_dst['images'] = images_dst
+    coco_dst['annotations'] = annotations_dst
+    coco_dst['categories'] = categories_src
+
+    with open(annotations_file_out, "w") as f:
+        json.dump(coco_dst, f)
+
+    print(">> complete. find coco json here: ", annotations_file_out)
+
+from matplotlib.collections import PatchCollection
+from matplotlib.patches import Polygon
+
+def showAnns(coco, file_name, anns):
+
+        ax = plt.gca()
+        ax.set_autoscale_on(False)
+        polygons = []
+        color = []
+        for ann in anns:
+            c = (np.random.random((1, 3))*0.6+0.4).tolist()[0]
+
+            [bbox_x, bbox_y, bbox_w, bbox_h] = ann['bbox']
+            poly = [[bbox_x, bbox_y], [bbox_x, bbox_y+bbox_h], [bbox_x+bbox_w, bbox_y+bbox_h], [bbox_x+bbox_w, bbox_y]]
+            np_poly = np.array(poly).reshape((4,2))
+            polygons.append(Polygon(np_poly))
+            color.append(c)
+
+            category_id = ann['category_id']
+            category_name = coco.cats[category_id]
+
+            plt.text(bbox_x, bbox_y-10, file_name + " " + str(category_name))
+
+        p = PatchCollection(polygons, facecolor=color, linewidths=0, alpha=0.4)
+        ax.add_collection(p)
+        p = PatchCollection(polygons, facecolor='none', edgecolors=color, linewidths=2)
+        ax.add_collection(p)
+
+def displayCoco(in_path, annFile):
+
+    # Initialize the COCO api for instance annotations
+    coco = COCO(os.path.join(in_path,  annFile))
+   
+    # Load the categories in a variable
+    imgIds = coco.getImgIds()
+    print("Number of images:", len(imgIds))
+
+    # load and display a random image
+    for i in range(len(imgIds)):
+        img = coco.loadImgs(imgIds[i])[0]
+
+        I = Image.open(in_path + "/" + img['file_name'])
+
+        plt.imshow(I)
+        plt.axis('off')
+
+        annIds = coco.getAnnIds(imgIds=img['id'])
+        anns = coco.loadAnns(annIds)
+        showAnns(coco, img['file_name'], anns)
+
+        plt.waitforbuttonpress()
+        plt.clf()
 
 def parse_args():
     '''Parse input arguments
@@ -571,12 +836,15 @@ def parse_args():
     parser.add_argument("--create_masks",
       help="Create object masks", action="store_true")
 
+    parser.add_argument("--create_json",
+      help="Create coco JSON", action="store_true")
+
     # Paths
     parser.add_argument('--background_dir', default='E:/Source/EffortlessCV/data/backgrounds/', type=str)
     parser.add_argument('--distractor_dir', default='E:/Source/EffortlessCV/data/distractors/', type=str)
 
     # Parameters for generator
-    parser.add_argument('--workers', default=10, type=int)
+    parser.add_argument('--workers', default=16, type=int)
     parser.add_argument("--blending_list", nargs="+", default=['gaussian']) # can be ['gaussian','poisson', 'none', 'box', 'motion']
 
     # Parameters for images
@@ -588,15 +856,17 @@ def parse_args():
     parser.add_argument('--height', default=480, type=int)
 
     # Parameters for objects in images
-    parser.add_argument('--min_scale', default=.8, type=float) # min scale for scale augmentation
+    parser.add_argument('--min_scale', default=.5, type=float) # min scale for scale augmentation
     parser.add_argument('--max_scale', default=1.5, type=float) # max scale for scale augmentation
     parser.add_argument('--min_distractor_scale', default=.1, type=float) # min scale for scale augmentation
     parser.add_argument('--max_distractor_scale', default=.5, type=float) # max scale for scale augmentation
     parser.add_argument('--max_degrees', default=5, type=float) # max rotation allowed during rotation augmentation
-    parser.add_argument('--max_truncation_fraction', default=0, type=float) # max fraction to be truncated = max_truncation_fraction*(width/height)
-    parser.add_argument('--max_allowed_iou', default=.5, type=float) # IOU > max_allowed_iou is considered an occlusion
+    parser.add_argument('--max_truncation_fraction', default=0.1, type=float) # max fraction to be truncated = max_truncation_fraction*(width/height)
+    parser.add_argument('--max_allowed_iou', default=.25, type=float) # IOU > max_allowed_iou is considered an occlusion
     parser.add_argument('--min_width', default=100, type=int) # Minimum width of object to use for data generation
     parser.add_argument('--min_height', default=100, type=int) # Minimum height of object to use for data generation
+
+    parser.add_argument("--one_type_per_image", action="store_true")
 
     args = parser.parse_args()
     return args
@@ -617,10 +887,25 @@ COCO_LICENSES = [{
 }]
 
 if __name__ == '__main__':
-    args = parse_args()
+    #args = parse_args()
         
-    if (args.create_masks):
-        from segment import generate_masks
-        generate_masks(args.root)
+    #print("\nInput dir %s" % args.root)
+    #print("Output dir %s\n" % args.exp)
 
-    generate_synthetic_dataset(args)
+    #if (args.create_masks):
+    #    from segment import generate_masks
+    #    generate_masks(args.root)
+    #elif (args.create_json):
+    #    coco_from_imagefolder(args)
+    #else:
+    #    generate_synthetic_dataset(args)
+
+    #change_fgvc_classes("E:/Source/EffortlessCVData/planes/objects_benchmark/test.json", "E:/Source/EffortlessCVData/planes/annotations/trainval.json", "E:/Source/EffortlessCVData/planes/annotations/trainval_renumbered_classes.json")
+    #change_fgvc_classes("E:/Source/EffortlessCVData/planes/objects_benchmark/test.json", "E:/Source/EffortlessCVData/planes/annotations/test.json", "E:/Source/EffortlessCVData/planes/annotations/test_renumbered_classes.json")
+    #change_fgvc_classes("E:/Source/EffortlessCVData/planes/objects_benchmark/test.json", "E:/Source/EffortlessCVData/planes/train_bing50/annotations2.json", "E:/Source/EffortlessCVData/planes/train_bing50/annotations_renumbered_classes.json")
+
+    #displayCoco("E:/Research/Images/FineGrained/fgvc-aircraft-2013b/data/images", "E:/Source/EffortlessCVData/planes/annotations/test.json")
+    #displayCoco("E:/Research/Images/FineGrained/fgvc-aircraft-2013b/data/images", "E:/Source/EffortlessCVData/planes/annotations/test_renumbered_classes.json")
+    #displayCoco("E:/Source/EffortlessCVData/planes/objects_benchmark", "E:/Source/EffortlessCVData/planes/objects_benchmark/test.json")
+    
+    image_thumbnails("E:/Source/EffortlessCVData/fruit/objects_expansion", 1, max_w=16)
