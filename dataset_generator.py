@@ -234,6 +234,7 @@ def render_objects(backgrounds, all_objects, min_scale, max_scale, args, already
     blending_list = args.blending_list
     w = args.width
     h = args.height
+    max_scale = min(max_scale,1.0)
 
     rendered = False
     annotation_id = 0
@@ -289,8 +290,15 @@ def render_objects(backgrounds, all_objects, min_scale, max_scale, args, already
         attempt_place = 0
         while True:
             attempt_place +=1
-            x = random.randint(int(-args.max_truncation_fraction*o_w), int(w-o_w+args.max_truncation_fraction*o_w))
-            y = random.randint(int(-args.max_truncation_fraction*o_h), int(h-o_h+args.max_truncation_fraction*o_h))
+
+            # gaussian perterb from placing centered
+            if (args.gaussian_trans):
+                x = int(w/2-(xmax-xmin)/2) + int(np.random.normal(args.gaussian_trans_mean[0]*w, args.gaussian_trans_std[0]*w))
+                y = int(h/2-(ymax-ymin)/2) + int(np.random.normal(args.gaussian_trans_mean[1]*h, args.gaussian_trans_std[1]*h))
+            else:
+                x = random.randint(int(-args.max_truncation_fraction*o_w), int(w-o_w+args.max_truncation_fraction*o_w))
+                y = random.randint(int(-args.max_truncation_fraction*o_h), int(h-o_h+args.max_truncation_fraction*o_h))
+
             found = True
             if args.dontocclude:
                 for prev in already_syn:
@@ -635,7 +643,26 @@ def center_crop(img):
     crop_img = img[mid_y-ch2:mid_y+ch2, mid_x-cw2:mid_x+cw2]
     return crop_img
     
-def image_thumbnails(path, num_per_dir=1, thumbsize=128, max_w=8):
+from PIL import Image, ImageDraw, ImageFont
+
+def draw_image(image, label):
+
+    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    image = Image.fromarray(image)
+
+    font = ImageFont.truetype("arial.ttf", size=16)
+
+    draw = ImageDraw.Draw(image)
+    draw.text((5, 5), label, fill=(255,255,0), font=font)
+
+    image = np.asarray(image)
+    image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+
+    return image
+
+import random
+
+def image_thumbnails(path, num_per_dir=1, thumbsize=128, max_w=8, display_label=False):
     
     thumbs_files = []
 
@@ -673,6 +700,9 @@ def image_thumbnails(path, num_per_dir=1, thumbsize=128, max_w=8):
             file = os.path.join(path, img_list[i])
             thumbs_files.append(file)
 
+    if (display_label):
+        random.shuffle(thumbs_files)
+        
     print(thumbs_files)
 
     w = max_w
@@ -687,6 +717,9 @@ def image_thumbnails(path, num_per_dir=1, thumbsize=128, max_w=8):
         if (im is not None):
             im = center_crop(im)
             im = cv2.resize(im, (thumbsize,thumbsize))
+
+            if (display_label):
+                im = draw_image(im, os.path.split(thumbs_file)[0].split("/")[-1])
 
             r = i//w
             c = i - r*w
@@ -836,6 +869,9 @@ def parse_args():
     parser.add_argument("--create_masks",
       help="Create object masks", action="store_true")
 
+    parser.add_argument("--background",
+      help="Create object masks", action="store_true")
+
     parser.add_argument("--create_json",
       help="Create coco JSON", action="store_true")
 
@@ -857,7 +893,7 @@ def parse_args():
 
     # Parameters for objects in images
     parser.add_argument('--min_scale', default=.5, type=float) # min scale for scale augmentation
-    parser.add_argument('--max_scale', default=1.5, type=float) # max scale for scale augmentation
+    parser.add_argument('--max_scale', default=1.0, type=float) # max scale for scale augmentation
     parser.add_argument('--min_distractor_scale', default=.1, type=float) # min scale for scale augmentation
     parser.add_argument('--max_distractor_scale', default=.5, type=float) # max scale for scale augmentation
     parser.add_argument('--max_degrees', default=5, type=float) # max rotation allowed during rotation augmentation
@@ -865,6 +901,10 @@ def parse_args():
     parser.add_argument('--max_allowed_iou', default=.25, type=float) # IOU > max_allowed_iou is considered an occlusion
     parser.add_argument('--min_width', default=100, type=int) # Minimum width of object to use for data generation
     parser.add_argument('--min_height', default=100, type=int) # Minimum height of object to use for data generation
+
+    parser.add_argument("--gaussian_trans", action="store_true")
+    parser.add_argument('--gaussian_trans_mean', nargs=2, default=(0,0), type=float) #in fraction of image dimension
+    parser.add_argument('--gaussian_trans_std', nargs=2, default=(.01,.01), type=float) #in fraction of image dimension
 
     parser.add_argument("--one_type_per_image", action="store_true")
 
@@ -887,18 +927,18 @@ COCO_LICENSES = [{
 }]
 
 if __name__ == '__main__':
-    #args = parse_args()
+    args = parse_args()
         
-    #print("\nInput dir %s" % args.root)
-    #print("Output dir %s\n" % args.exp)
+    print("\ninput dir %s" % args.root)
+    print("output dir %s\n" % args.exp)
 
-    #if (args.create_masks):
-    #    from segment import generate_masks
-    #    generate_masks(args.root)
-    #elif (args.create_json):
-    #    coco_from_imagefolder(args)
-    #else:
-    #    generate_synthetic_dataset(args)
+    if (args.create_masks):
+        from segment import generate_masks
+        generate_masks(args.root, True)
+    elif (args.create_json):
+        coco_from_imagefolder(args)
+    else:
+        generate_synthetic_dataset(args)
 
     #change_fgvc_classes("E:/Source/EffortlessCVData/planes/objects_benchmark/test.json", "E:/Source/EffortlessCVData/planes/annotations/trainval.json", "E:/Source/EffortlessCVData/planes/annotations/trainval_renumbered_classes.json")
     #change_fgvc_classes("E:/Source/EffortlessCVData/planes/objects_benchmark/test.json", "E:/Source/EffortlessCVData/planes/annotations/test.json", "E:/Source/EffortlessCVData/planes/annotations/test_renumbered_classes.json")
@@ -908,4 +948,4 @@ if __name__ == '__main__':
     #displayCoco("E:/Research/Images/FineGrained/fgvc-aircraft-2013b/data/images", "E:/Source/EffortlessCVData/planes/annotations/test_renumbered_classes.json")
     #displayCoco("E:/Source/EffortlessCVData/planes/objects_benchmark", "E:/Source/EffortlessCVData/planes/objects_benchmark/test.json")
     
-    image_thumbnails("E:/Source/EffortlessCVData/fruit/objects_expansion", 1, max_w=16)
+    #image_thumbnails("E:/Source/EffortlessCVData/planes/objects_benchmark", 1, max_w=6, display_label=True)

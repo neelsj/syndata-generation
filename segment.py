@@ -105,7 +105,7 @@ def create_sub_mask_annotation(sub_mask, image_id, category_id, annotation_id, i
 
     return annotation
 
-def generate_masks(data_dir):
+def generate_masks(data_dir, background=False):
     
     dirs = os.listdir(data_dir)
 
@@ -126,15 +126,18 @@ def generate_masks(data_dir):
     categories = []
 
     for dir in tqdm(dirs):
-        files = os.listdir(os.path.join(data_dir, dir))
+        files_dir = os.path.join(data_dir, dir)
+
+        if (not os.path.isdir(files_dir)):
+            continue
+
+        files = os.listdir(files_dir)
+        files = [file for file in files if "_mask" not in file]
 
         category = {"supercategory": "object", "id": category_id, "name": dir}
         categories.append(category)
 
         for file in tqdm(files):
-
-            if ("_mask" in file):
-                continue
 
             filename = os.path.join(data_dir, dir, file)
             #print(filename)
@@ -151,64 +154,71 @@ def generate_masks(data_dir):
 
             mask = create_mask(image)
 
+            if (background):
+
+                maskname = os.path.splitext(filename)[0] + "_mask.jpg"
+                maskObj = np.uint8(255*(mask==0))
+                Image.fromarray(maskObj).save(maskname)
+
             #plt.imshow(np.array(image)[:,:,0]*mask)
             #plt.show()
 
-            nb_components, output, boxes, centroids = cv2.connectedComponentsWithStats(mask, connectivity=8)
-            box_sizes = [box[4] for box in boxes[1:]]        
+            else:
+                nb_components, output, boxes, centroids = cv2.connectedComponentsWithStats(mask, connectivity=8)
+                box_sizes = [box[4] for box in boxes[1:]]        
 
-            for id in range(1, nb_components):
+                for id in range(1, nb_components):
                 
-                box = [int(b) for b in boxes[id][0:4]]
+                    box = [int(b) for b in boxes[id][0:4]]
 
-                sub_mask = np.reshape(output==id, mask.shape).astype(np.double)
+                    sub_mask = np.reshape(output==id, mask.shape).astype(np.double)
 
-                #plt.imshow(sub_mask)
-                #plt.show()
-
-                prc = 100*box_sizes[id-1]/(mask.shape[0]*mask.shape[1])
-                
-                if (prc >= prcThresh):
-                    try:
-                        annotation = create_sub_mask_annotation(sub_mask, image_id, category_id, annotation_id, False, bbox=box)
-                        annotations.append(annotation)
-                        annotation_id += 1
-                    except Exception as e:
-                        print(e)
-                        pass
-
-
-            #print(nb_components)
-            #print(output)
-            #print(stats)
-            #print(centroids)
-
-            # save mask for dominant big object
-            if (box_sizes):
-                max_ind = np.argmax(box_sizes)
-                #print(max_ind)
-
-                prc = 100*box_sizes[max_ind]/(mask.shape[0]*mask.shape[1])
-                #print(prc)                
-
-                if (prc >= prcThresh):
-                    maskname = os.path.splitext(filename)[0] + "_mask.jpg"
-                    #print(maskname)
-
-                    maskObj = np.uint8(255*np.reshape(1-(output==max_ind+1),  mask.shape))
-
-                    #maskObjN = 255-maskObj
-                    #edgeSum = np.sum(maskObjN[:,0]) + np.sum(maskObjN[:,-1]) + np.sum(maskObjN[0,:]) + np.sum(maskObjN[-1,:])
-                    
-                    #if (edgeSum == 0):
-                    Image.fromarray(maskObj).save(maskname)
-
-                    ##mask.putpalette(colors)
-                    #plt.subplot(121)
-                    #plt.imshow(image)                    
-                    #plt.subplot(122)
-                    #plt.imshow(maskObj)
+                    #plt.imshow(sub_mask)
                     #plt.show()
+
+                    prc = 100*box_sizes[id-1]/(mask.shape[0]*mask.shape[1])
+                
+                    if (prc >= prcThresh):
+                        try:
+                            annotation = create_sub_mask_annotation(sub_mask, image_id, category_id, annotation_id, False, bbox=box)
+                            annotations.append(annotation)
+                            annotation_id += 1
+                        except Exception as e:
+                            print(e)
+                            pass
+
+
+                #print(nb_components)
+                #print(output)
+                #print(stats)
+                #print(centroids)
+
+                # save mask for dominant big object
+                if (box_sizes):
+                    max_ind = np.argmax(box_sizes)
+                    #print(max_ind)
+
+                    prc = 100*box_sizes[max_ind]/(mask.shape[0]*mask.shape[1])
+                    #print(prc)                
+
+                    if (prc >= prcThresh):
+                        maskname = os.path.splitext(filename)[0] + "_mask.jpg"
+                        #print(maskname)
+
+                        maskObj = np.uint8(255*np.reshape(1-(output==max_ind+1),  mask.shape))
+
+                        #maskObjN = 255-maskObj
+                        #edgeSum = np.sum(maskObjN[:,0]) + np.sum(maskObjN[:,-1]) + np.sum(maskObjN[0,:]) + np.sum(maskObjN[-1,:])
+                    
+                        #if (edgeSum == 0):
+                        Image.fromarray(maskObj).save(maskname)
+
+                        ##mask.putpalette(colors)
+                        #plt.subplot(121)
+                        #plt.imshow(image)                    
+                        #plt.subplot(122)
+                        #plt.imshow(maskObj)
+                        #plt.show()
 
             image_id += 1
 

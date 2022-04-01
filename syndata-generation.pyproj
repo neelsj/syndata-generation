@@ -4,7 +4,7 @@
     <SchemaVersion>2.0</SchemaVersion>
     <ProjectGuid>ef5a706e-110a-430a-a3cc-e18d3b062a6d</ProjectGuid>
     <ProjectHome>.</ProjectHome>
-    <StartupFile>dataset_generator.py</StartupFile>
+    <StartupFile>coco_stats.py</StartupFile>
     <SearchPath>
     </SearchPath>
     <WorkingDirectory>.</WorkingDirectory>
@@ -12,8 +12,8 @@
     <Name>syndata-generation</Name>
     <RootNamespace>syndata-generation</RootNamespace>
     <LaunchProvider>Standard Python launcher</LaunchProvider>
-    <CommandLineArguments>E:/Source/EffortlessCVData/planes/objects_benchmark_recognition --create_json</CommandLineArguments>
-    <EnableNativeCodeDebugging>False</EnableNativeCodeDebugging>
+    <CommandLineArguments>E:\Source\EffortlessCVData\planes\annotations\test_renumbered_classes.json</CommandLineArguments>
+    <EnableNativeCodeDebugging>True</EnableNativeCodeDebugging>
     <InterpreterId>Global|VisualStudio|pytorch37</InterpreterId>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
@@ -26,6 +26,9 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="cocosplit.py">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="coco_stats.py">
       <SubType>Code</SubType>
     </Compile>
     <Compile Include="dataset_generator.py" />
