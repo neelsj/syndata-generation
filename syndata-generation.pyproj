@@ -4,7 +4,7 @@
     <SchemaVersion>2.0</SchemaVersion>
     <ProjectGuid>ef5a706e-110a-430a-a3cc-e18d3b062a6d</ProjectGuid>
     <ProjectHome>.</ProjectHome>
-    <StartupFile>coco_stats.py</StartupFile>
+    <StartupFile>dataset_generator.py</StartupFile>
     <SearchPath>
     </SearchPath>
     <WorkingDirectory>.</WorkingDirectory>
@@ -12,9 +12,9 @@
     <Name>syndata-generation</Name>
     <RootNamespace>syndata-generation</RootNamespace>
     <LaunchProvider>Standard Python launcher</LaunchProvider>
-    <CommandLineArguments>E:\Source\EffortlessCVData\planes\annotations\test_renumbered_classes.json</CommandLineArguments>
-    <EnableNativeCodeDebugging>True</EnableNativeCodeDebugging>
-    <InterpreterId>Global|VisualStudio|pytorch37</InterpreterId>
+    <CommandLineArguments>E:\Source\EffortlessCVSystem\Data\coco_objects --create_masks_coco</CommandLineArguments>
+    <EnableNativeCodeDebugging>False</EnableNativeCodeDebugging>
+    <InterpreterId>Global|PythonCore|3.9</InterpreterId>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
     <DebugSymbols>true</DebugSymbols>
@@ -33,10 +33,13 @@
     </Compile>
     <Compile Include="dataset_generator.py" />
     <Compile Include="defaults.py" />
+    <Compile Include="objectnet_to_imagenet.py">
+      <SubType>Code</SubType>
+    </Compile>
     <Compile Include="segment.py" />
   </ItemGroup>
   <ItemGroup>
-    <InterpreterReference Include="Global|VisualStudio|pytorch37" />
+    <InterpreterReference Include="Global|PythonCore|3.9" />
   </ItemGroup>
   <Import Project="$(MSBuildExtensionsPath32)\Microsoft\VisualStudio\v$(VisualStudioVersion)\Python Tools\Microsoft.PythonTools.targets" />
   <!-- Uncomment the CoreCompile target to enable the Build command in

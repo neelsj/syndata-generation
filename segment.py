@@ -13,11 +13,7 @@ from shapely.geometry import Polygon, MultiPolygon
 from PIL import Image
 import cv2
 
-#model = torch.hub.load('pytorch/vision:v0.10.0', 'deeplabv3_resnet50', pretrained=True)
-model = torch.hub.load('pytorch/vision:v0.10.0', 'deeplabv3_resnet101', pretrained=True)
-# model = torch.hub.load('pytorch/vision:v0.10.0', 'deeplabv3_mobilenet_v3_large', pretrained=True)
-model.eval()
-
+from torchvision.models.detection import maskrcnn_resnet50_fpn_v2, MaskRCNN_ResNet50_FPN_V2_Weights
 from torchvision import transforms
 
 COCO_INFO = {
@@ -35,7 +31,18 @@ COCO_LICENSES = [{
     "name": "License"
 }]
 
+model = None
+
 def create_mask(input_image):
+
+    global model
+
+    if (model is None):
+        #model = torch.hub.load('pytorch/vision:v0.10.0', 'deeplabv3_resnet50', pretrained=True)
+        model = torch.hub.load('pytorch/vision:v0.10.0', 'deeplabv3_resnet101', pretrained=True)
+        # model = torch.hub.load('pytorch/vision:v0.10.0', 'deeplabv3_mobilenet_v3_large', pretrained=True)
+        model.eval()
+
     input_image = input_image.convert("RGB")
     preprocess = transforms.Compose([
         transforms.ToTensor(),
@@ -58,6 +65,67 @@ def create_mask(input_image):
 
     mask = np.uint8(255*(output_predictions.cpu().numpy() > 0))
     #mask = output_predictions.byte().cpu().numpy()
+
+    return mask
+
+def create_mask_coco(input_image, category, keepBiggest=True):
+
+    global model
+    global preprocess
+    global weights
+
+    if (model is None):
+        weights = MaskRCNN_ResNet50_FPN_V2_Weights.COCO_V1
+        preprocess = weights.transforms()
+    
+        model = maskrcnn_resnet50_fpn_v2(weights=weights, progress=False)
+        model = model.eval()
+
+    input_image = input_image.convert("RGB")
+
+    input_tensor = preprocess(input_image)
+    input_batch = input_tensor.unsqueeze(0) # create a mini-batch as expected by the model
+
+    # move the input and model to GPU for speed if available
+    if torch.cuda.is_available():
+        input_batch = input_batch.to('cuda')
+        model.to('cuda')
+
+    with torch.no_grad():
+        output = model(input_batch)[0]
+
+    mask = None
+    
+    labels = [weights.meta["categories"][label] for label in output['labels']]
+
+    if (labels):
+
+        #print(labels)
+
+        mask = np.zeros((input_image.size[1],input_image.size[0]))
+
+        masks = output["masks"].cpu().numpy()
+        
+        maskCatsMax = 0
+
+        for i in range(masks.shape[0]):
+
+            if (labels[i] == category):
+                maskCat = (masks[i,:,:,:].squeeze() > .5).astype(float)
+
+                if (keepBiggest):
+                    maskCatsMean = np.mean(maskCat)
+
+                    if (maskCatsMean > maskCatsMax):
+                        mask = maskCat            
+                        maskCatsMax = maskCatsMean        
+                else:
+                    mask = np.maximum(mask, maskCat)
+
+    #plt.imshow(mask)
+    #plt.waitforbuttonpress()
+
+        mask = mask if np.mean(mask) > .1 else None
 
     return mask
 
@@ -105,7 +173,7 @@ def create_sub_mask_annotation(sub_mask, image_id, category_id, annotation_id, i
 
     return annotation
 
-def generate_masks(data_dir, background=False):
+def generate_masks(data_dir, background=False, coco=False):
     
     dirs = os.listdir(data_dir)
 
@@ -152,83 +220,87 @@ def generate_masks(data_dir, background=False):
             new_img["id"] = image_id
             images.append(new_img)
 
-            mask = create_mask(image)
-
-            if (background):
-
-                maskname = os.path.splitext(filename)[0] + "_mask.jpg"
-                maskObj = np.uint8(255*(mask==0))
-                Image.fromarray(maskObj).save(maskname)
-
-            #plt.imshow(np.array(image)[:,:,0]*mask)
-            #plt.show()
-
+            if (coco):
+                mask = create_mask_coco(image, dir)
             else:
-                nb_components, output, boxes, centroids = cv2.connectedComponentsWithStats(mask, connectivity=8)
-                box_sizes = [box[4] for box in boxes[1:]]        
+                mask = create_mask(image)
 
-                for id in range(1, nb_components):
+            if (mask is not None):
+                if (background):
+
+                    maskname = os.path.splitext(filename)[0] + "_mask.jpg"
+                    maskObj = np.uint8(255*(mask==0))
+                    Image.fromarray(maskObj).save(maskname)
+
+                #plt.imshow(np.array(image)[:,:,0]*mask)
+                #plt.show()
+
+                else:
+                    nb_components, output, boxes, centroids = cv2.connectedComponentsWithStats(mask, connectivity=8)
+                    box_sizes = [box[4] for box in boxes[1:]]        
+
+                    for id in range(1, nb_components):
                 
-                    box = [int(b) for b in boxes[id][0:4]]
+                        box = [int(b) for b in boxes[id][0:4]]
 
-                    sub_mask = np.reshape(output==id, mask.shape).astype(np.double)
+                        sub_mask = np.reshape(output==id, mask.shape).astype(np.double)
 
-                    #plt.imshow(sub_mask)
-                    #plt.show()
-
-                    prc = 100*box_sizes[id-1]/(mask.shape[0]*mask.shape[1])
-                
-                    if (prc >= prcThresh):
-                        try:
-                            annotation = create_sub_mask_annotation(sub_mask, image_id, category_id, annotation_id, False, bbox=box)
-                            annotations.append(annotation)
-                            annotation_id += 1
-                        except Exception as e:
-                            print(e)
-                            pass
-
-
-                #print(nb_components)
-                #print(output)
-                #print(stats)
-                #print(centroids)
-
-                # save mask for dominant big object
-                if (box_sizes):
-                    max_ind = np.argmax(box_sizes)
-                    #print(max_ind)
-
-                    prc = 100*box_sizes[max_ind]/(mask.shape[0]*mask.shape[1])
-                    #print(prc)                
-
-                    if (prc >= prcThresh):
-                        maskname = os.path.splitext(filename)[0] + "_mask.jpg"
-                        #print(maskname)
-
-                        maskObj = np.uint8(255*np.reshape(1-(output==max_ind+1),  mask.shape))
-
-                        #maskObjN = 255-maskObj
-                        #edgeSum = np.sum(maskObjN[:,0]) + np.sum(maskObjN[:,-1]) + np.sum(maskObjN[0,:]) + np.sum(maskObjN[-1,:])
-                    
-                        #if (edgeSum == 0):
-                        Image.fromarray(maskObj).save(maskname)
-
-                        ##mask.putpalette(colors)
-                        #plt.subplot(121)
-                        #plt.imshow(image)                    
-                        #plt.subplot(122)
-                        #plt.imshow(maskObj)
+                        #plt.imshow(sub_mask)
                         #plt.show()
 
-            image_id += 1
+                        prc = 100*box_sizes[id-1]/(mask.shape[0]*mask.shape[1])
+                
+                        if (prc >= prcThresh):
+                            try:
+                                annotation = create_sub_mask_annotation(sub_mask, image_id, category_id, annotation_id, False, bbox=box)
+                                annotations.append(annotation)
+                                annotation_id += 1
+                            except Exception as e:
+                                print(e)
+                                pass
 
-            #if (image_id > 3):
+
+                    #print(nb_components)
+                    #print(output)
+                    #print(stats)
+                    #print(centroids)
+
+                    # save mask for dominant big object
+                    if (box_sizes):
+                        max_ind = np.argmax(box_sizes)
+                        #print(max_ind)
+
+                        prc = 100*box_sizes[max_ind]/(mask.shape[0]*mask.shape[1])
+                        #print(prc)                
+
+                        if (prc >= prcThresh):
+                            maskname = os.path.splitext(filename)[0] + "_mask.jpg"
+                            #print(maskname)
+
+                            maskObj = np.uint8(255*np.reshape(1-(output==max_ind+1),  mask.shape))
+
+                            #maskObjN = 255-maskObj
+                            #edgeSum = np.sum(maskObjN[:,0]) + np.sum(maskObjN[:,-1]) + np.sum(maskObjN[0,:]) + np.sum(maskObjN[-1,:])
+                    
+                            #if (edgeSum == 0):
+                            Image.fromarray(maskObj).save(maskname)
+
+                            ##mask.putpalette(colors)
+                            #plt.subplot(121)
+                            #plt.imshow(image)                    
+                            #plt.subplot(122)
+                            #plt.imshow(maskObj)
+                            #plt.show()
+
+                image_id += 1
+
+                #if (image_id > 3):
+                #    break
+
+            category_id += 1
+
+            #if (category_id > 3):
             #    break
-
-        category_id += 1
-
-        #if (category_id > 3):
-        #    break
 
     print("saving annotations to coco as json ")
     ### create COCO JSON annotations

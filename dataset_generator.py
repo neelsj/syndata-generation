@@ -106,9 +106,9 @@ def get_list_of_images(root_dir):
 
     if (len(img_list) == 0):
         img_list = glob.glob(os.path.join(root_dir, '*/*.jpg'))
-
-    img_list = [img.replace("_mask", "") for img in img_list]
-
+    else:
+        img_list = [img.replace("_mask", "") for img in img_list]
+    
     return img_list
 
 def get_mask_file(img_file):
@@ -239,7 +239,12 @@ def render_objects(backgrounds, all_objects, min_scale, max_scale, args, already
     rendered = False
     annotation_id = 0
     for idx, obj in enumerate(all_objects):
-        foreground = Image.open(obj[0])
+
+        if (os.path.isfile(obj[0])):
+            foreground = Image.open(obj[0])
+        else:
+            foreground = Image.open(obj[0].replace("jpg", "JPEG"))
+
         xmin, xmax, ymin, ymax = get_annotation_from_mask_file(get_mask_file(obj[0]))
         if xmin == -1 or ymin == -1 or xmax-xmin < args.min_width or ymax-ymin < args.min_height :
             continue
@@ -258,7 +263,12 @@ def render_objects(backgrounds, all_objects, min_scale, max_scale, args, already
             attempt_scale = 0
             while True:
                 attempt_scale +=1
-                scale = random.uniform(min_scale, max_scale)*additional_scale
+
+                if (args.stats and image_id):                                  
+                    scale = np.clip(1-np.random.lognormal(args.stats["s"]["mean"], args.stats["s"]["std"]), min_scale, max_scale)*additional_scale
+                else:
+                    scale = random.uniform(min_scale, max_scale)*additional_scale
+
                 o_w, o_h = int(scale*orig_w), int(scale*orig_h)
                 if  w-o_w > 0 and h-o_h > 0 and o_w > 0 and o_h > 0:
                     foreground = foreground.resize((o_w, o_h), Image.ANTIALIAS)
@@ -292,7 +302,10 @@ def render_objects(backgrounds, all_objects, min_scale, max_scale, args, already
             attempt_place +=1
 
             # gaussian perterb from placing centered
-            if (args.gaussian_trans):
+            if (args.stats and image_id):  
+                x = int(w/2-(xmax-xmin)/2) + int(np.random.normal(args.stats["x"]["mean"]*w, args.stats["x"]["std"]*w))
+                y = int(h/2-(ymax-ymin)/2) + int(np.random.normal(args.stats["y"]["mean"]*h, args.stats["y"]["std"]*h))
+            elif (args.gaussian_trans):
                 x = int(w/2-(xmax-xmin)/2) + int(np.random.normal(args.gaussian_trans_mean[0]*w, args.gaussian_trans_std[0]*w))
                 y = int(h/2-(ymax-ymin)/2) + int(np.random.normal(args.gaussian_trans_mean[1]*h, args.gaussian_trans_std[1]*h))
             else:
@@ -465,7 +478,10 @@ def gen_syn_data(args):
         for i in range(N):
             img_labels = img_labels + random.sample(img_files, len(img_files))
 
-    background_files = glob.glob(os.path.join(args.background_dir, '*/*.jpg'))    
+    background_files = glob.glob(os.path.join(args.background_dir, '*/*.jpg')) 
+    if (not background_files):
+        background_files = glob.glob(os.path.join(args.background_dir, '*/*/*.jpg')) 
+
     print ("Number of background images : %d" % len(background_files))
 
     if (args.add_distractors or args.add_backgroud_distractors):
@@ -485,7 +501,11 @@ def gen_syn_data(args):
     while any(img_labels):
         # Get list of objects
         objects = []
-        n = min(random.randint(args.min_objects, args.max_objects), len(img_labels))
+
+        if (args.stats):
+            n = int(np.round(max(np.random.lognormal(args.stats["n"]["mean"], args.stats["n"]["std"]), 0), 1))
+        else:
+            n = min(random.randint(args.min_objects, args.max_objects), len(img_labels))
 
         if (args.one_type_per_image):
             non_empty = [i for i in range(len(img_labels)) if len(img_labels[i])>0]
@@ -869,6 +889,9 @@ def parse_args():
     parser.add_argument("--create_masks",
       help="Create object masks", action="store_true")
 
+    parser.add_argument("--create_masks_coco",
+      help="Create object masks", action="store_true")
+
     parser.add_argument("--background",
       help="Create object masks", action="store_true")
 
@@ -893,7 +916,7 @@ def parse_args():
 
     # Parameters for objects in images
     parser.add_argument('--min_scale', default=.5, type=float) # min scale for scale augmentation
-    parser.add_argument('--max_scale', default=1.0, type=float) # max scale for scale augmentation
+    parser.add_argument('--max_scale', default=0.95, type=float) # max scale for scale augmentation
     parser.add_argument('--min_distractor_scale', default=.1, type=float) # min scale for scale augmentation
     parser.add_argument('--max_distractor_scale', default=.5, type=float) # max scale for scale augmentation
     parser.add_argument('--max_degrees', default=5, type=float) # max rotation allowed during rotation augmentation
@@ -901,6 +924,8 @@ def parse_args():
     parser.add_argument('--max_allowed_iou', default=.25, type=float) # IOU > max_allowed_iou is considered an occlusion
     parser.add_argument('--min_width', default=100, type=int) # Minimum width of object to use for data generation
     parser.add_argument('--min_height', default=100, type=int) # Minimum height of object to use for data generation
+
+    parser.add_argument('--stats_file', default="", type=str)
 
     parser.add_argument("--gaussian_trans", action="store_true")
     parser.add_argument('--gaussian_trans_mean', nargs=2, default=(0,0), type=float) #in fraction of image dimension
@@ -928,16 +953,25 @@ COCO_LICENSES = [{
 
 if __name__ == '__main__':
     args = parse_args()
-        
+    args.stats = None
+
     print("\ninput dir %s" % args.root)
     print("output dir %s\n" % args.exp)
 
-    if (args.create_masks):
+    if (args.create_masks or args.create_masks_coco):
         from segment import generate_masks
-        generate_masks(args.root, True)
+        generate_masks(args.root, True, args.create_masks_coco)
     elif (args.create_json):
         coco_from_imagefolder(args)
     else:
+        if (args.stats_file):
+            print("using stats")
+            
+            with open(args.stats_file, 'rt', encoding='UTF-8') as stats:
+                args.stats = json.load(stats)
+
+            print(args.stats)
+
         generate_synthetic_dataset(args)
 
     #change_fgvc_classes("E:/Source/EffortlessCVData/planes/objects_benchmark/test.json", "E:/Source/EffortlessCVData/planes/annotations/trainval.json", "E:/Source/EffortlessCVData/planes/annotations/trainval_renumbered_classes.json")
