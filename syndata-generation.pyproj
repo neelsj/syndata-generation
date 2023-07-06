@@ -4,7 +4,7 @@
     <SchemaVersion>2.0</SchemaVersion>
     <ProjectGuid>ef5a706e-110a-430a-a3cc-e18d3b062a6d</ProjectGuid>
     <ProjectHome>.</ProjectHome>
-    <StartupFile>dataset_generator.py</StartupFile>
+    <StartupFile>features_viz.py</StartupFile>
     <SearchPath>
     </SearchPath>
     <WorkingDirectory>.</WorkingDirectory>
@@ -12,7 +12,7 @@
     <Name>syndata-generation</Name>
     <RootNamespace>syndata-generation</RootNamespace>
     <LaunchProvider>Standard Python launcher</LaunchProvider>
-    <CommandLineArguments>E:\Source\EffortlessCVSystem\Data\coco_objects --create_masks_coco</CommandLineArguments>
+    <CommandLineArguments>E:\Source\EffortlessCVSystem\Data\coco_objects_good --background_dir E:\Research\Images\Places365\val --exp E:\Source\EffortlessCVSystem\Data\coco_spatial_backgrounds --dontocclude --total_num 10 --spatial_pairs --scale --rotation --translation --focus_objs dog,umbrella</CommandLineArguments>
     <EnableNativeCodeDebugging>False</EnableNativeCodeDebugging>
     <InterpreterId>Global|PythonCore|3.9</InterpreterId>
   </PropertyGroup>
@@ -25,6 +25,7 @@
     <EnableUnmanagedDebugging>false</EnableUnmanagedDebugging>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="clip_features.py" />
     <Compile Include="cocosplit.py">
       <SubType>Code</SubType>
     </Compile>
@@ -33,6 +34,7 @@
     </Compile>
     <Compile Include="dataset_generator.py" />
     <Compile Include="defaults.py" />
+    <Compile Include="features_viz.py" />
     <Compile Include="objectnet_to_imagenet.py">
       <SubType>Code</SubType>
     </Compile>

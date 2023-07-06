@@ -68,6 +68,16 @@ def create_mask(input_image):
 
     return mask
 
+def check_mask(mask):    
+
+    #plt.imshow(mask)
+    #plt.waitforbuttonpress()
+
+    #margin = 5
+    #mask = None if (np.mean(mask) < .05 or np.mean(mask) > .95 or np.max(mask[0:margin,:]) == 1 or np.max(mask[:,0:margin]) == 1 or np.max(mask[-margin:,:]) == 1 or np.max(mask[:,-margin:])) else mask
+    mask = None if (np.mean(mask) < .05 or np.mean(mask) > .95) else mask
+    return mask
+
 def create_mask_coco(input_image, category, keepBiggest=True):
 
     global model
@@ -122,10 +132,10 @@ def create_mask_coco(input_image, category, keepBiggest=True):
                 else:
                     mask = np.maximum(mask, maskCat)
 
-    #plt.imshow(mask)
-    #plt.waitforbuttonpress()
+        #plt.imshow(mask)
+        #plt.waitforbuttonpress()
 
-        mask = mask if np.mean(mask) > .1 else None
+        mask = check_mask(mask)
 
     return mask
 

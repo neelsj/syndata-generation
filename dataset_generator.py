@@ -28,8 +28,9 @@ import math
 from pyblur3 import *
 from collections import namedtuple
 
-import csv
 from pycocotools.coco import COCO
+
+from itertools import combinations
 
 Rectangle = namedtuple('Rectangle', 'xmin ymin xmax ymax')
 
@@ -209,6 +210,11 @@ def create_image_anno_wrapper(objects, args):
    '''
    return create_image_anno(*objects, args)
 
+def create_image_anno_spatial_pairs_wrapper(objects, args):
+   ''' Wrapper used to pass params to workers
+   '''
+   return create_image_spatial_pairs_anno(*objects, args)
+
 def crop_resize(im, desired_size):
     old_size = im.size  # old_size[0] is in (width, height) format
 
@@ -372,6 +378,109 @@ def render_objects(backgrounds, all_objects, min_scale, max_scale, args, already
 
     return rendered, already_syn, annotations
 
+def render_object_spatial_pair(img, args):
+    
+    w = args.width
+    h = args.height
+
+    if (os.path.isfile(img)):
+        foreground = Image.open(img)
+    else:
+        foreground = Image.open(img.replace("jpg", "JPEG"))
+
+    mask_file =  get_mask_file(img)
+    xmin, xmax, ymin, ymax = get_annotation_from_mask_file(mask_file)    
+    mask = Image.open(mask_file)
+
+    #foreground.show()
+    #mask.show()
+
+    foreground = foreground.crop((xmin, ymin, xmax, ymax))
+    orig_w, orig_h = foreground.size
+
+    mask = mask.crop((xmin, ymin, xmax, ymax))
+    if INVERTED_MASK:
+        mask = Image.fromarray(255-PIL2array1C(mask)).convert('1')
+    o_w, o_h = orig_w, orig_h
+
+    #foreground.show()
+    #mask.show()
+
+    additional_scale = min(0.4*w/o_w,0.4*h/o_h)
+
+    if args.scale:
+        scale = random.uniform(args.min_scale, args.max_scale)*additional_scale
+    else:
+        scale = additional_scale
+
+    o_w, o_h = int(scale*orig_w), int(scale*orig_h)
+
+    foreground = foreground.resize((o_w, o_h), Image.ANTIALIAS)
+    mask = mask.resize((o_w, o_h), Image.ANTIALIAS)
+                
+    #foreground.show()
+    #mask.show()
+
+    if args.rotation:
+        rot_degrees = random.randint(-args.max_degrees, args.max_degrees)
+        foreground = foreground.rotate(rot_degrees, expand=True)
+        mask = mask.rotate(rot_degrees, expand=True)
+
+        xmin, xmax, ymin, ymax = get_annotation_from_mask(mask)
+
+        foreground = foreground.crop((xmin, ymin, xmax, ymax))
+        mask = mask.crop((xmin, ymin, xmax, ymax))
+
+    #foreground.show()
+    #mask.show()
+
+    return foreground, mask
+
+def render_objects_spatial_pair(background, imgA, imgB, relation, args):
+
+    w = args.width
+    h = args.height
+
+    foregroundA, maskA = render_object_spatial_pair(imgA, args)
+    foregroundB, maskB = render_object_spatial_pair(imgB, args)
+
+    if (relation == "left"):
+        xA = w*.25
+        yA = h*.5
+        xB = w*.75
+        yB = h*.5
+
+    elif (relation == "right"):
+        xA = w*.75
+        yA = h*.5
+        xB = w*.25
+        yB = h*.5
+
+    elif (relation == "above"):
+        xA = w*.5
+        yA = h*.25
+        xB = w*.5
+        yB = h*.75
+    else:
+        xA = w*.5
+        yA = h*.75
+        xB = w*.5
+        yB = h*.25
+
+    if args.translation:
+        xA += random.uniform(-args.min_trans*w, args.min_trans*w)
+        yA += random.uniform(-args.min_trans*h, args.min_trans*h)
+        xB += random.uniform(-args.min_trans*w, args.min_trans*w)
+        yB += random.uniform(-args.min_trans*h, args.min_trans*h)
+
+    background.paste(foregroundA, (int(xA-foregroundA.size[0]/2), int(yA-foregroundA.size[1]/2)), Image.fromarray(cv2.GaussianBlur(PIL2array1C(maskA),(5,5),2)))
+    background.paste(foregroundB, (int(xB-foregroundB.size[0]/2), int(yB-foregroundB.size[1]/2)), Image.fromarray(cv2.GaussianBlur(PIL2array1C(maskB),(5,5),2)))
+
+    #background.show()
+
+    return
+
+
 def create_image_anno(objects, distractor_objects, img_file, bg_file, image_id, args):
     '''Add data augmentation, synthesizes images and generates annotations according to given parameters
 
@@ -431,6 +540,31 @@ def create_image_anno(objects, distractor_objects, img_file, bg_file, image_id, 
             backgrounds[i].save(img_file.replace('none', blending_list[i]))
 
     return img_info, annotations
+
+def create_image_spatial_pairs_anno(imgA, imgB, relation, backgroundImg, path, img_file, args):
+
+    print ("Working on %s\%s" % (path, img_file))
+
+    blending_list = args.blending_list
+    w = args.width
+    h = args.height
+
+    annotations = []
+
+    img_info = {}
+
+    #background = Image.new(mode="RGB", size=(w, h), color=(128, 128, 128))
+    background = Image.open(backgroundImg).resize((w, h))
+
+    render_objects_spatial_pair(background, imgA, imgB, relation, args)
+
+    os.makedirs(os.path.join(args.exp, path), exist_ok=True)
+    img_file = os.path.join(args.exp, path, img_file)
+
+    background.save(img_file)
+
+    return
+
 
 def gen_syn_data(args):
     '''Creates list of objects and distrctor objects to be pasted on what images.
@@ -534,11 +668,12 @@ def gen_syn_data(args):
         idx += 1
 
         if (idx >= args.total_num):
-            break
-
-    partial_func = partial(create_image_anno_wrapper, args=args) 
+            break    
 
     if (args.workers>1):
+
+        partial_func = partial(create_image_anno_wrapper, args=args) 
+
         p = get_context("spawn").Pool(args.workers, init_worker)
         try:
             results = p.map(partial_func, params_list)
@@ -551,10 +686,147 @@ def gen_syn_data(args):
     else:
         results = []
         for object in params_list:
-            img_info, annotations = create_image_anno_wrapper(object, args=args)
+            img_info, annotations = create_image_anno(*object, args=args)
             results.append([img_info, annotations])
 
     return results, unique_labels
+
+def gen_syn_data_spatial_pairs(args):
+    '''Creates list of objects and distrctor objects to be pasted on what images.
+       Spawns worker processes and generates images according to given params
+
+    Args:
+        img_files(list): List of image files
+        labels(list): List of labels for each image  
+    '''
+
+    w = args.width
+    h = args.height   
+
+    img_list = get_list_of_images(args.root) 
+    labels = get_labels(img_list)
+    unique_labels = sorted(set(labels))
+
+    background_list = get_list_of_images(args.background_dir) 
+    background_labels = get_labels(background_list)
+    unique_background_labels = sorted(set(background_labels))
+
+    print ("Number of classes : %d" % len(unique_labels))
+    print ("Number of input images : %d" % len(img_list))
+
+    print ("Number of background classes : %d" % len(unique_background_labels))
+    print ("Number of background images : %d" % len(background_list))
+
+    img_files = list(zip(img_list, labels))
+    background_files = list(zip(background_list, background_labels))
+
+    labels_to_images = {}
+    for label in labels:
+        labels_to_images[label] = []
+
+    for img_file in img_files:
+        labels_to_images[img_file[1]].append(img_file[0])
+
+    background_labels_to_images = {}
+    for label in background_labels:
+        background_labels_to_images[label] = []
+
+    for img_file in background_files:
+        background_labels_to_images[img_file[1]].append(img_file[0])
+
+    #unique_labels = random.sample(unique_labels,10)
+    #print ("Using number of classes : %d" % len(unique_labels))
+
+    if (args.total_other_objs>0):
+        unique_labels = random.sample(unique_labels,args.total_other_objs)
+
+    if (args.focus_objs):
+        pairs = []
+        for focus_obj in args.focus_objs.split(","):
+            for obj in unique_labels:
+                pairs.append((focus_obj, obj))
+    else:
+        pairs = list(combinations(unique_labels, 2))
+
+    relations = ["left", "right", "above", "below"]
+
+    obj_rels = []
+
+    params_list = []
+
+    print ("Number of output images : %d" % (len(pairs)*4*args.total_num*args.total_backgrounds*args.total_num))
+
+    backgrounds = random.sample(unique_background_labels,args.total_backgrounds)
+
+    for background in backgrounds:
+
+        backgroundImgs = random.sample(background_labels_to_images[background],args.total_num)
+
+        for pair in pairs:
+
+            A = pair[0]
+            B = pair[1]
+
+            #print(labels_to_images[A])
+            #print(labels_to_images[B])
+
+            imgAs = random.sample(labels_to_images[A],args.total_num)
+            imgBs = random.sample(labels_to_images[B],args.total_num)
+
+            for backgroundImg in backgroundImgs:
+
+                for i in range(args.total_num):
+
+                    imgA = imgAs[i]
+                    imgB = imgBs[i]
+                
+                    for relation in relations:
+            
+                        obj_rels.append([A, B, relation, background])
+
+                        path = "%s_%s\%s\%s" % (A, B, relation, background)
+                        img_file = '%s_%s_%s.jpg' % (os.path.splitext(os.path.basename(imgA))[0], os.path.splitext(os.path.basename(imgB))[0], os.path.splitext(os.path.basename(backgroundImg))[0])
+
+                        params = (imgA, imgB, relation, backgroundImg, path, img_file)
+                        params_list.append(params)           
+
+    with open(os.path.join(args.exp, 'pairs.csv'), 'w', newline='') as csvfile:
+        writer = csv.writer(csvfile)
+
+        for i in range(len(params_list)):
+            params = params_list[i]
+            obj_rel = obj_rels[i]
+
+            fileA = os.path.splitext(os.path.basename(params[0]))[0]
+            fileB = os.path.splitext(os.path.basename(params[1]))[0]            
+            backfile = params[3]
+            path = params[4]
+            img_file = params[5]
+
+            output_file = os.path.join(path, img_file)
+
+            row = obj_rel + [fileA, fileB, backfile, output_file]
+
+            writer.writerow(row)
+
+    if (args.workers>1):
+        partial_func = partial(create_image_anno_spatial_pairs_wrapper, args=args) 
+
+        p = get_context("spawn").Pool(args.workers, init_worker)
+        try:
+            p.map(partial_func, params_list)
+        except KeyboardInterrupt:
+            print ("....\nCaught KeyboardInterrupt, terminating workers")
+            p.terminate()
+        else:
+            p.close()
+        p.join()
+    else:
+        results = []
+        for object in params_list:
+            create_image_spatial_pairs_anno(*object, args=args)
+
+    return
 
 def init_worker():
     '''
@@ -877,6 +1149,8 @@ def parse_args():
       help="Add scale augmentation.Default is to add scale augmentation.", action="store_false")
     parser.add_argument("--rotation",
       help="Add rotation augmentation.Default is to add rotation augmentation.", action="store_false")
+    parser.add_argument("--translation",
+      help="Add rotation augmentation.Default is to add translate augmentation.", action="store_false")
     parser.add_argument("--total_num",
       help="Number of times each image will be in dataset", default=0, type=int)
     parser.add_argument("--dontocclude",
@@ -916,7 +1190,9 @@ def parse_args():
 
     # Parameters for objects in images
     parser.add_argument('--min_scale', default=.5, type=float) # min scale for scale augmentation
-    parser.add_argument('--max_scale', default=0.95, type=float) # max scale for scale augmentation
+    parser.add_argument('--max_scale', default=1.0, type=float) # max scale for scale augmentation
+    parser.add_argument('--min_trans', default=.05, type=float) # min scale for scale augmentation
+    parser.add_argument('--max_trans', default=.05, type=float) # max scale for scale augmentation
     parser.add_argument('--min_distractor_scale', default=.1, type=float) # min scale for scale augmentation
     parser.add_argument('--max_distractor_scale', default=.5, type=float) # max scale for scale augmentation
     parser.add_argument('--max_degrees', default=5, type=float) # max rotation allowed during rotation augmentation
@@ -930,8 +1206,16 @@ def parse_args():
     parser.add_argument("--gaussian_trans", action="store_true")
     parser.add_argument('--gaussian_trans_mean', nargs=2, default=(0,0), type=float) #in fraction of image dimension
     parser.add_argument('--gaussian_trans_std', nargs=2, default=(.01,.01), type=float) #in fraction of image dimension
-
+    
     parser.add_argument("--one_type_per_image", action="store_true")
+
+    parser.add_argument("--spatial_pairs", action="store_true")
+
+    parser.add_argument("--focus_objs", default="", type=str)
+
+    parser.add_argument("--total_backgrounds", default=10, type=int)
+
+    parser.add_argument("--total_other_objs", default=10, type=int)
 
     args = parser.parse_args()
     return args
@@ -963,6 +1247,8 @@ if __name__ == '__main__':
         generate_masks(args.root, True, args.create_masks_coco)
     elif (args.create_json):
         coco_from_imagefolder(args)
+    if (args.spatial_pairs):
+        gen_syn_data_spatial_pairs(args) 
     else:
         if (args.stats_file):
             print("using stats")
@@ -973,6 +1259,28 @@ if __name__ == '__main__':
             print(args.stats)
 
         generate_synthetic_dataset(args)
+
+    #img_list = get_list_of_images(args.root) 
+
+    #for img in img_list:
+    #    print(img)
+    #    mask_file =  get_mask_file(img)
+    #    mask = Image.open(mask_file)
+    #    mask = Image.fromarray(255-PIL2array1C(mask)).convert('1')
+
+    #    w, h = mask.size
+
+    #    mask = np.array(mask)
+    #    avg = np.mean(mask)
+    #    b = 20
+    #    mw = int(w*.25)
+    #    mh = int(h*.25)
+    #    border = np.sum(mask[0:b,:]) + np.sum(mask[-b:,:]) + np.sum(mask[:,0:b]) + np.sum(mask[:,-b:])
+    #    center = np.mean(mask[int(h/2)-mh:int(h/2)+mh,int(w/2)-mw:int(w/2)+mw])
+
+    #    if (avg < .1 or border > 0 or center < .25):
+    #        os.remove(img)
+    #        os.remove(mask_file)
 
     #change_fgvc_classes("E:/Source/EffortlessCVData/planes/objects_benchmark/test.json", "E:/Source/EffortlessCVData/planes/annotations/trainval.json", "E:/Source/EffortlessCVData/planes/annotations/trainval_renumbered_classes.json")
     #change_fgvc_classes("E:/Source/EffortlessCVData/planes/objects_benchmark/test.json", "E:/Source/EffortlessCVData/planes/annotations/test.json", "E:/Source/EffortlessCVData/planes/annotations/test_renumbered_classes.json")
