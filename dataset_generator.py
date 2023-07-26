@@ -215,6 +215,11 @@ def create_image_anno_spatial_pairs_wrapper(objects, args):
    '''
    return create_image_spatial_pairs_anno(*objects, args)
 
+def create_image_anno_spatial_wrapper(objects, args):
+   ''' Wrapper used to pass params to workers
+   '''
+   return create_image_spatial_anno(*objects, args)
+
 def crop_resize(im, desired_size):
     old_size = im.size  # old_size[0] is in (width, height) format
 
@@ -480,6 +485,37 @@ def render_objects_spatial_pair(background, imgA, imgB, relation, args):
 
     return
 
+def render_objects_spatial(background, imgA, relation, args):
+
+    w = args.width
+    h = args.height
+
+    foregroundA, maskA = render_object_spatial_pair(imgA, args)
+    
+    if (relation == "left"):
+        xA = w*.25
+        yA = h*.5
+
+    elif (relation == "right"):
+        xA = w*.75
+        yA = h*.5
+
+    elif (relation == "top"):
+        xA = w*.5
+        yA = h*.25
+    else:
+        xA = w*.5
+        yA = h*.75
+
+    if args.translation:
+        xA += random.uniform(-args.min_trans*w, args.min_trans*w)
+        yA += random.uniform(-args.min_trans*h, args.min_trans*h)
+
+    background.paste(foregroundA, (int(xA-foregroundA.size[0]/2), int(yA-foregroundA.size[1]/2)), Image.fromarray(cv2.GaussianBlur(PIL2array1C(maskA),(5,5),2)))
+
+    #background.show()
+
+    return
 
 def create_image_anno(objects, distractor_objects, img_file, bg_file, image_id, args):
     '''Add data augmentation, synthesizes images and generates annotations according to given parameters
@@ -565,6 +601,29 @@ def create_image_spatial_pairs_anno(imgA, imgB, relation, backgroundImg, path, i
 
     return
 
+def create_image_spatial_anno(imgA, relation, backgroundImg, path, img_file, args):
+
+    print ("Working on %s\%s" % (path, img_file))
+
+    blending_list = args.blending_list
+    w = args.width
+    h = args.height
+
+    annotations = []
+
+    img_info = {}
+
+    #background = Image.new(mode="RGB", size=(w, h), color=(128, 128, 128))
+    background = Image.open(backgroundImg).resize((w, h))
+
+    render_objects_spatial(background, imgA, relation, args)
+
+    os.makedirs(os.path.join(args.exp, path), exist_ok=True)
+    img_file = os.path.join(args.exp, path, img_file)
+
+    background.save(img_file)
+
+    return
 
 def gen_syn_data(args):
     '''Creates list of objects and distrctor objects to be pasted on what images.
@@ -691,6 +750,47 @@ def gen_syn_data(args):
 
     return results, unique_labels
 
+def get_article(a):
+    if (a[0] in ("a", "e", "i", "o", "u")):
+        return "an " + a 
+    else:
+        return "a " + a
+
+def get_relation(relation):
+    if (relation in ("left", "right")):
+        return " to the " + relation + " of "
+    else:
+        return " " + relation + " "
+
+def mirror_relation(relation):
+    if (relation == "left"):
+        return "right"
+    elif (relation == "right"):
+        return "left"
+    elif (relation == "above"):
+        return "below"
+    else:
+        return "above"
+
+def create_prompts(a, b, relation, background):
+
+    background = background.replace("-", " ").replace("_", " ")
+
+    prompta = get_article(a) + get_relation(relation) + get_article(b) + " in a " + background
+    promptb = get_article(b) + get_relation(mirror_relation(relation)) + get_article(a) + " in a " + background
+
+    prompts = [prompta, promptb]
+
+    return prompts
+
+def create_prompt(a, relation, background):
+
+    background = background.replace("-", " ").replace("_", " ")
+
+    prompta = get_article(a) + " on the " + relation + " in a " + background
+
+    return prompta
+
 def gen_syn_data_spatial_pairs(args):
     '''Creates list of objects and distrctor objects to be pasted on what images.
        Spawns worker processes and generates images according to given params
@@ -703,12 +803,208 @@ def gen_syn_data_spatial_pairs(args):
     w = args.width
     h = args.height   
 
-    img_list = get_list_of_images(args.root) 
+    #img_list = get_list_of_images(args.root) 
+
+    if (args.val):
+        with open(os.path.join(args.root, "val.txt")) as f:
+            img_list = f.readlines()
+    else:
+        with open(os.path.join(args.root, "train.txt")) as f:
+            img_list = f.readlines()
+
+    img_list = [os.path.join(args.root, b.strip()) for b in img_list]
+
     labels = get_labels(img_list)
     unique_labels = sorted(set(labels))
 
-    background_list = get_list_of_images(args.background_dir) 
+    #background_list = get_list_of_images(args.background_dir) 
+
+    if (args.val):
+        with open(args.background_dir + "val.txt") as f:
+            background_list = f.readlines()
+    else:
+        with open(args.background_dir + "train.txt") as f:
+            background_list = f.readlines()
+
+    background_list = [os.path.join(args.background_dir, b.strip()) for b in background_list]
+
     background_labels = get_labels(background_list)
+   
+    unique_background_labels = sorted(set(background_labels))
+
+    print ("Number of classes : %d" % len(unique_labels))
+    print ("Number of input images : %d" % len(img_list))
+
+    print ("Number of background classes : %d" % len(unique_background_labels))
+    print ("Number of background images : %d" % len(background_list))
+
+    img_files = list(zip(img_list, labels))
+    background_files = list(zip(background_list, background_labels))
+
+    labels_to_images = {}
+    for label in labels:
+        labels_to_images[label] = []
+
+    for img_file in img_files:
+        labels_to_images[img_file[1]].append(img_file[0])
+
+    background_labels_to_images = {}
+    for label in background_labels:
+        background_labels_to_images[label] = []
+
+    for img_file in background_files:
+        background_labels_to_images[img_file[1]].append(img_file[0])
+
+    #unique_labels = random.sample(unique_labels,10)
+    #print ("Using number of classes : %d" % len(unique_labels))
+
+    if (args.focus_objs):
+
+        if (args.total_objs>0):
+            unique_labels = random.sample(unique_labels,args.total_objs)
+
+        pairs = []
+        for focus_obj in args.focus_objs.split(","):
+            for obj in unique_labels:
+                pairs.append((focus_obj, obj))
+    else:
+
+        if (args.total_objs>0):
+            unique_labelsA = random.sample(unique_labels,args.total_objs)
+            unique_labelsB = random.sample(list(set(unique_labels).difference(set(unique_labelsA))),args.total_objs)
+
+            pairs = []
+            for objA in unique_labelsA:
+                for objB in unique_labelsB:
+
+                    pairs.append((objA, objB))
+        else:
+            pairs = list(combinations(unique_labels, 2))
+
+    relations = ["left", "right", "above", "below"]
+
+    obj_rels = []
+
+    params_list = []
+
+    #pick classes of 
+    backgrounds = random.sample(unique_background_labels,args.total_backgrounds)
+
+    tups = []
+    for pair in pairs:
+        for background in backgrounds:
+            for relation in relations:
+                tups.append(pair + (background, relation))
+
+    print ("Number of output images : %d" % (len(tups)*args.total_num))
+
+    for tup in tups:
+
+        #classes for A, B, and background
+        A = tup[0]
+        B = tup[1]
+        background = tup[2]
+        relation = tup[3]
+
+        #print(labels_to_images[A])
+        #print(labels_to_images[B])
+
+        # pick instances of A and B
+        if (len(labels_to_images[A]) >= args.total_num):
+            imgAs = random.sample(labels_to_images[A], args.total_num)
+        else:
+            imgAs = random.choices(labels_to_images[A], k=args.total_num)
+            
+        if (len(labels_to_images[B]) >= args.total_num):
+            imgBs = random.sample(labels_to_images[B], args.total_num)
+        else:
+            imgBs = random.choices(labels_to_images[B], k=args.total_num)
+
+        #pick instances of background
+        backgroundImgs = random.sample(background_labels_to_images[background],args.total_num)
+
+        for i in range(args.total_num):
+
+            imgA = imgAs[i]
+            imgB = imgBs[i]
+            backgroundImg =  backgroundImgs[i]
+
+            path = ("val\%s_%s\%s\%s" if args.val else "train\%s_%s\%s\%s") % (A, B, relation, background)
+            img_file = '%s_%s_%s.jpg' % (os.path.splitext(os.path.basename(imgA))[0], os.path.splitext(os.path.basename(imgB))[0], os.path.splitext(os.path.basename(backgroundImg))[0])
+
+            params = (imgA, imgB, relation, backgroundImg, path, img_file)
+            params_list.append(params)           
+
+            prompts = create_prompts(A, B, relation, background)
+
+            output_file = os.path.join(path, img_file)
+            obj_rels.append([output_file] + prompts)
+
+    with open(os.path.join(args.exp, 'val.csv' if args.val else 'train.csv'), 'w', newline='') as csvfile:
+        writer = csv.writer(csvfile)
+
+        for obj_rel in obj_rels:
+            writer.writerow(obj_rel[0:2])
+            writer.writerow([obj_rel[0], obj_rel[2]])
+
+    if (args.workers>1):
+        partial_func = partial(create_image_anno_spatial_pairs_wrapper, args=args) 
+
+        p = get_context("spawn").Pool(args.workers, init_worker)
+        try:
+            p.map(partial_func, params_list)
+        except KeyboardInterrupt:
+            print ("....\nCaught KeyboardInterrupt, terminating workers")
+            p.terminate()
+        else:
+            p.close()
+        p.join()
+    else:
+        results = []
+        for object in params_list:
+            create_image_spatial_pairs_anno(*object, args=args)
+
+    return
+
+def gen_syn_data_spatial(args):
+    '''Creates list of objects and distrctor objects to be pasted on what images.
+       Spawns worker processes and generates images according to given params
+
+    Args:
+        img_files(list): List of image files
+        labels(list): List of labels for each image  
+    '''
+
+    w = args.width
+    h = args.height   
+
+    #img_list = get_list_of_images(args.root) 
+
+    if (args.val):
+        with open(os.path.join(args.root, "val.txt")) as f:
+            img_list = f.readlines()
+    else:
+        with open(os.path.join(args.root, "train.txt")) as f:
+            img_list = f.readlines()
+
+    img_list = [os.path.join(args.root, b.strip()) for b in img_list]
+
+    labels = get_labels(img_list)
+    unique_labels = sorted(set(labels))
+
+    #background_list = get_list_of_images(args.background_dir) 
+
+    if (args.val):
+        with open(args.background_dir + "val.txt") as f:
+            background_list = f.readlines()
+    else:
+        with open(args.background_dir + "train.txt") as f:
+            background_list = f.readlines()
+
+    background_list = [os.path.join(args.background_dir, b.strip()) for b in background_list]
+
+    background_labels = get_labels(background_list)
+   
     unique_background_labels = sorted(set(background_labels))
 
     print ("Number of classes : %d" % len(unique_labels))
@@ -741,76 +1037,70 @@ def gen_syn_data_spatial_pairs(args):
         unique_labels = random.sample(unique_labels,args.total_other_objs)
 
     if (args.focus_objs):
-        pairs = []
-        for focus_obj in args.focus_objs.split(","):
-            for obj in unique_labels:
-                pairs.append((focus_obj, obj))
+        pairs = args.focus_objs.split(",")
     else:
-        pairs = list(combinations(unique_labels, 2))
+        pairs = unique_labels
 
-    relations = ["left", "right", "above", "below"]
+    relations = ["left", "right", "top", "bottom"]
 
     obj_rels = []
 
     params_list = []
 
-    print ("Number of output images : %d" % (len(pairs)*4*args.total_num*args.total_backgrounds*args.total_num))
-
+    #pick classes of 
     backgrounds = random.sample(unique_background_labels,args.total_backgrounds)
 
-    for background in backgrounds:
+    tups = []
+    for pair in pairs:
+        for background in backgrounds:
+            for relation in relations:
+                tups.append((pair, background, relation))
 
+    print ("Number of output images : %d" % (len(tups)*args.total_num))
+
+    for tup in tups:
+
+        #classes for A, B, and background
+        A = tup[0]
+        background = tup[1]
+        relation = tup[2]
+
+        #print(labels_to_images[A])
+        #print(labels_to_images[B])
+
+        # pick instances of A and B
+        if (len(labels_to_images[A]) >= args.total_num):
+            imgAs = random.sample(labels_to_images[A], args.total_num)
+        else:
+            imgAs = random.choices(labels_to_images[A], k=args.total_num)
+           
+        #pick instances of background
         backgroundImgs = random.sample(background_labels_to_images[background],args.total_num)
 
-        for pair in pairs:
+        for i in range(args.total_num):
 
-            A = pair[0]
-            B = pair[1]
+            imgA = imgAs[i]
+            backgroundImg =  backgroundImgs[i]
 
-            #print(labels_to_images[A])
-            #print(labels_to_images[B])
+            path = ("val\%s\%s\%s" if args.val else "train\%s\%s\%s") % (A, relation, background)
+            img_file = '%s_%s.jpg' % (os.path.splitext(os.path.basename(imgA))[0], os.path.splitext(os.path.basename(backgroundImg))[0])
 
-            imgAs = random.sample(labels_to_images[A],args.total_num)
-            imgBs = random.sample(labels_to_images[B],args.total_num)
+            params = (imgA, relation, backgroundImg, path, img_file)
+            params_list.append(params)           
 
-            for backgroundImg in backgroundImgs:
-
-                for i in range(args.total_num):
-
-                    imgA = imgAs[i]
-                    imgB = imgBs[i]
-                
-                    for relation in relations:
-            
-                        obj_rels.append([A, B, relation, background])
-
-                        path = "%s_%s\%s\%s" % (A, B, relation, background)
-                        img_file = '%s_%s_%s.jpg' % (os.path.splitext(os.path.basename(imgA))[0], os.path.splitext(os.path.basename(imgB))[0], os.path.splitext(os.path.basename(backgroundImg))[0])
-
-                        params = (imgA, imgB, relation, backgroundImg, path, img_file)
-                        params_list.append(params)           
-
-    with open(os.path.join(args.exp, 'pairs.csv'), 'w', newline='') as csvfile:
-        writer = csv.writer(csvfile)
-
-        for i in range(len(params_list)):
-            params = params_list[i]
-            obj_rel = obj_rels[i]
-
-            fileA = os.path.splitext(os.path.basename(params[0]))[0]
-            fileB = os.path.splitext(os.path.basename(params[1]))[0]            
-            backfile = params[3]
-            path = params[4]
-            img_file = params[5]
+            prompt = create_prompt(A, relation, background)
 
             output_file = os.path.join(path, img_file)
+            obj_rels.append([output_file, prompt])
 
-            row = obj_rel + [fileA, fileB, backfile, output_file]
+    with open(os.path.join(args.exp, 'val.csv' if args.val else 'train.csv'), 'w', newline='') as csvfile:
+        writer = csv.writer(csvfile)
 
-            writer.writerow(row)
+        for obj_rel in obj_rels:
+            writer.writerow(obj_rel)
 
     if (args.workers>1):
-        partial_func = partial(create_image_anno_spatial_pairs_wrapper, args=args) 
+        partial_func = partial(create_image_anno_spatial_wrapper, args=args) 
 
         p = get_context("spawn").Pool(args.workers, init_worker)
         try:
@@ -824,25 +1114,19 @@ def gen_syn_data_spatial_pairs(args):
     else:
         results = []
         for object in params_list:
-            create_image_spatial_pairs_anno(*object, args=args)
+            create_image_spatial_anno(*object, args=args)
 
     return
 
 def init_worker():
     '''
-    Catch Ctrl+C signal to termiante workers
+    Catch Ctrl+C signal to terminate workers
     '''
     signal.signal(signal.SIGINT, signal.SIG_IGN)
  
 def generate_synthetic_dataset(args):
     ''' Generate synthetic dataset according to given args
-    '''
-
-    if not os.path.exists(args.exp):
-        os.makedirs(args.exp)   
-    
-    if not os.path.exists(args.exp):
-        os.makedirs(args.exp)
+    '''  
     
     results, unique_labels = gen_syn_data(args)  
 
@@ -1152,7 +1436,7 @@ def parse_args():
     parser.add_argument("--translation",
       help="Add rotation augmentation.Default is to add translate augmentation.", action="store_false")
     parser.add_argument("--total_num",
-      help="Number of times each image will be in dataset", default=0, type=int)
+      help="Number of times each image will be in dataset", default=2, type=int)
     parser.add_argument("--dontocclude",
       help="Add objects without occlusion. Default is to produce occlusions", action="store_true")
     parser.add_argument("--add_distractors",
@@ -1190,7 +1474,7 @@ def parse_args():
 
     # Parameters for objects in images
     parser.add_argument('--min_scale', default=.5, type=float) # min scale for scale augmentation
-    parser.add_argument('--max_scale', default=1.0, type=float) # max scale for scale augmentation
+    parser.add_argument('--max_scale', default=1.2, type=float) # max scale for scale augmentation
     parser.add_argument('--min_trans', default=.05, type=float) # min scale for scale augmentation
     parser.add_argument('--max_trans', default=.05, type=float) # max scale for scale augmentation
     parser.add_argument('--min_distractor_scale', default=.1, type=float) # min scale for scale augmentation
@@ -1211,11 +1495,17 @@ def parse_args():
 
     parser.add_argument("--spatial_pairs", action="store_true")
 
+    parser.add_argument("--spatial", action="store_true")
+
     parser.add_argument("--focus_objs", default="", type=str)
 
-    parser.add_argument("--total_backgrounds", default=10, type=int)
+    parser.add_argument("--total_backgrounds", default=1, type=int)
 
-    parser.add_argument("--total_other_objs", default=10, type=int)
+    parser.add_argument("--total_objs", default=10, type=int)
+
+    parser.add_argument("--colors", action="store_true")
+
+    parser.add_argument("--val", action="store_true")
 
     args = parser.parse_args()
     return args
@@ -1239,6 +1529,9 @@ if __name__ == '__main__':
     args = parse_args()
     args.stats = None
 
+    if not os.path.exists(args.exp):
+        os.makedirs(args.exp) 
+
     print("\ninput dir %s" % args.root)
     print("output dir %s\n" % args.exp)
 
@@ -1249,6 +1542,8 @@ if __name__ == '__main__':
         coco_from_imagefolder(args)
     if (args.spatial_pairs):
         gen_syn_data_spatial_pairs(args) 
+    elif (args.spatial):
+        gen_syn_data_spatial(args) 
     else:
         if (args.stats_file):
             print("using stats")
@@ -1272,15 +1567,62 @@ if __name__ == '__main__':
 
     #    mask = np.array(mask)
     #    avg = np.mean(mask)
-    #    b = 20
+    #    b = 4
     #    mw = int(w*.25)
     #    mh = int(h*.25)
     #    border = np.sum(mask[0:b,:]) + np.sum(mask[-b:,:]) + np.sum(mask[:,0:b]) + np.sum(mask[:,-b:])
     #    center = np.mean(mask[int(h/2)-mh:int(h/2)+mh,int(w/2)-mw:int(w/2)+mw])
 
-    #    if (avg < .1 or border > 0 or center < .25):
-    #        os.remove(img)
-    #        os.remove(mask_file)
+    #    if not (avg < .1 or border > 0 or center < .1):
+
+    #        img_target = img.replace(args.root, args.exp)
+    #        mask_file_target = mask_file.replace(args.root, args.exp)
+
+    #        if (not os.path.exists(os.path.dirname(img_target))):
+    #            os.makedirs(os.path.dirname(img_target))
+
+    #        shutil.copyfile(img, img_target)
+    #        shutil.copyfile(mask_file, mask_file_target)
+            
+    #img_list = get_list_of_images(args.exp) 
+    #labels = get_labels(img_list)
+    #unique_labels = sorted(set(labels))
+
+    #unique_labels_count = {}
+    #unique_labels_files = {}
+    #for label in unique_labels:
+    #    unique_labels_count[label] = 0
+    #    unique_labels_files[label] = []
+
+    #for i, img in enumerate(img_list):
+    #    label = labels[i]
+    #    unique_labels_count[label] += 1
+    #    unique_labels_files[label].append(img)
+        
+    #train = []
+    #val = []
+
+    #for label in unique_labels:
+    #    print("%s:\t%d" % (label, unique_labels_count[label]))
+    #    files = unique_labels_files[label]
+    #    random.shuffle(files)
+
+    #    s = max(int(len(files)*.2),2)
+    #    v = sorted(files[:s])
+    #    t = sorted(files[s:])
+
+    #    val += v
+    #    train += t
+
+    #with open(os.path.join(args.exp, 'val.txt'), "w") as fd:
+    #    for v in val:
+    #        fd.write(v.replace(args.exp,""))
+    #        fd.write("\n")
+    
+    #with open(os.path.join(args.exp, 'train.txt'), "w") as fd:
+    #    for t in train:
+    #        fd.write(t.replace(args.exp,""))
+    #        fd.write("\n")
 
     #change_fgvc_classes("E:/Source/EffortlessCVData/planes/objects_benchmark/test.json", "E:/Source/EffortlessCVData/planes/annotations/trainval.json", "E:/Source/EffortlessCVData/planes/annotations/trainval_renumbered_classes.json")
     #change_fgvc_classes("E:/Source/EffortlessCVData/planes/objects_benchmark/test.json", "E:/Source/EffortlessCVData/planes/annotations/test.json", "E:/Source/EffortlessCVData/planes/annotations/test_renumbered_classes.json")

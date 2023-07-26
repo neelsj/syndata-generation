@@ -4,7 +4,7 @@
     <SchemaVersion>2.0</SchemaVersion>
     <ProjectGuid>ef5a706e-110a-430a-a3cc-e18d3b062a6d</ProjectGuid>
     <ProjectHome>.</ProjectHome>
-    <StartupFile>features_viz.py</StartupFile>
+    <StartupFile>dataset_generator.py</StartupFile>
     <SearchPath>
     </SearchPath>
     <WorkingDirectory>.</WorkingDirectory>
@@ -12,9 +12,9 @@
     <Name>syndata-generation</Name>
     <RootNamespace>syndata-generation</RootNamespace>
     <LaunchProvider>Standard Python launcher</LaunchProvider>
-    <CommandLineArguments>E:\Source\EffortlessCVSystem\Data\coco_objects_good --background_dir E:\Research\Images\Places365\val --exp E:\Source\EffortlessCVSystem\Data\coco_spatial_backgrounds --dontocclude --total_num 10 --spatial_pairs --scale --rotation --translation --focus_objs dog,umbrella</CommandLineArguments>
+    <CommandLineArguments>E:\Source\EffortlessCVSystem\Data\coco_objects_good\ --background_dir E:\Research\Images\Places365\ --exp E:\Source\EffortlessCVSystem\Data\coco_spatial_pair_backgrounds_finetune --dontocclude  --total_num 1 --spatial_pairs --val  --scale --rotation --translation</CommandLineArguments>
     <EnableNativeCodeDebugging>False</EnableNativeCodeDebugging>
-    <InterpreterId>Global|PythonCore|3.9</InterpreterId>
+    <InterpreterId>CondaEnv|CondaEnv|control</InterpreterId>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
     <DebugSymbols>true</DebugSymbols>
@@ -41,7 +41,7 @@
     <Compile Include="segment.py" />
   </ItemGroup>
   <ItemGroup>
-    <InterpreterReference Include="Global|PythonCore|3.9" />
+    <InterpreterReference Include="CondaEnv|CondaEnv|control" />
   </ItemGroup>
   <Import Project="$(MSBuildExtensionsPath32)\Microsoft\VisualStudio\v$(VisualStudioVersion)\Python Tools\Microsoft.PythonTools.targets" />
   <!-- Uncomment the CoreCompile target to enable the Build command in
