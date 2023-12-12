@@ -1193,9 +1193,9 @@ def gen_syn_data_spatial(args):
         unique_labels = random.sample(unique_labels,args.total_objs)
 
     if (args.focus_objs):
-        pairs = args.focus_objs.split(",")
-    else:
-        pairs = unique_labels
+        unique_labels = args.focus_objs.split(",")
+        
+    pairs = unique_labels
 
     relations = ["left", "right", "top", "bottom"]
 
