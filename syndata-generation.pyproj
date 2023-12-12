@@ -12,9 +12,9 @@
     <Name>syndata-generation</Name>
     <RootNamespace>syndata-generation</RootNamespace>
     <LaunchProvider>Standard Python launcher</LaunchProvider>
-    <CommandLineArguments>E:\Source\EffortlessCVSystem\Data\coco_objects_good\ --background_dir E:\Research\Images\Places365\ --exp E:\Source\EffortlessCVSystem\Data\coco_spatial_pair_backgrounds_finetune --dontocclude  --total_num 1 --spatial_pairs --val  --scale --rotation --translation</CommandLineArguments>
+    <CommandLineArguments>E:\Source\EffortlessCVSystem\Data\coco_objects_good\ --background_dir E:\Research\Images\Places365\ --exp E:\Source\EffortlessCVSystem\Data\coco_spatial_pairs_detection --dontocclude  --val  --scale --rotation --translation --workers 10 --spatial_pairs --focus_objs "banana,baseball glove,bed,boat,book,bottle,broccoli,car,chair,couch,hair drier,horse,mouse,orange,potted plant,sheep,sink,toilet,wine glass,zebra"</CommandLineArguments>
     <EnableNativeCodeDebugging>False</EnableNativeCodeDebugging>
-    <InterpreterId>CondaEnv|CondaEnv|control</InterpreterId>
+    <InterpreterId>Global|VisualStudio|open_clip</InterpreterId>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
     <DebugSymbols>true</DebugSymbols>
@@ -41,7 +41,7 @@
     <Compile Include="segment.py" />
   </ItemGroup>
   <ItemGroup>
-    <InterpreterReference Include="CondaEnv|CondaEnv|control" />
+    <InterpreterReference Include="Global|VisualStudio|open_clip" />
   </ItemGroup>
   <Import Project="$(MSBuildExtensionsPath32)\Microsoft\VisualStudio\v$(VisualStudioVersion)\Python Tools\Microsoft.PythonTools.targets" />
   <!-- Uncomment the CoreCompile target to enable the Build command in

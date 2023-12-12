@@ -7,7 +7,7 @@ import xml.dom.minidom
 import cv2
 import numpy as np
 import random
-from PIL import Image
+from PIL import Image, ImageDraw 
 import scipy
 
 from multiprocessing import Pool
@@ -229,9 +229,9 @@ def crop_resize(im, desired_size):
 
     # thumbnail is a in-place operation
 
-    # im.thumbnail(new_size, Image.ANTIALIAS)
+    # im.thumbnail(new_size, Image.Resampling.LANCZOS)
 
-    im = im.resize(new_size, Image.ANTIALIAS)
+    im = im.resize(new_size, Image.Resampling.LANCZOS)
     # create a new image and paste the resized on it
 
     new_im = Image.new("RGB", (desired_size[0], desired_size[1]))
@@ -239,6 +239,19 @@ def crop_resize(im, desired_size):
                         (desired_size[1]-new_size[1])//2))
 
     return new_im
+
+def create_coco_annotation(xmin, ymin, xmax, ymax, image_id, obj, annotation_id):
+
+    annotation = {
+        'iscrowd': False,
+        'image_id': image_id,
+        'category_id':  obj,
+        'id': annotation_id,
+        'bbox': [xmin, ymin, xmax-xmin, ymax-ymin],
+        'area': (xmax-xmin)*(ymax-ymin)
+    }
+
+    return annotation
 
 def render_objects(backgrounds, all_objects, min_scale, max_scale, args, already_syn=[], annotations=None, image_id=None):
 
@@ -274,7 +287,7 @@ def render_objects(backgrounds, all_objects, min_scale, max_scale, args, already
             attempt_scale = 0
             while True:
                 attempt_scale +=1
-
+                frot
                 if (args.stats and image_id):                                  
                     scale = np.clip(1-np.random.lognormal(args.stats["s"]["mean"], args.stats["s"]["std"]), min_scale, max_scale)*additional_scale
                 else:
@@ -282,15 +295,16 @@ def render_objects(backgrounds, all_objects, min_scale, max_scale, args, already
 
                 o_w, o_h = int(scale*orig_w), int(scale*orig_h)
                 if  w-o_w > 0 and h-o_h > 0 and o_w > 0 and o_h > 0:
-                    foreground = foreground.resize((o_w, o_h), Image.ANTIALIAS)
-                    mask = mask.resize((o_w, o_h), Image.ANTIALIAS)
+                    foreground = foreground.resize((o_w, o_h), Image.Resampling.LANCZOS)
+                    mask = mask.resize((o_w, o_h), Image.Resampling.LANCZOS)
                     break
                 if attempt_scale == MAX_ATTEMPTS_TO_SYNTHESIZE:
                     o_w = w
                     o_h = h
-                    foreground = foreground.resize((o_w, o_h), Image.ANTIALIAS)
-                    mask = mask.resize((o_w, o_h), Image.ANTIALIAS)
-                    break            
+                    foreground = foreground.resize((o_w, o_h), Image.Resampling.LANCZOS)
+                    mask = mask.resize((o_w, o_h), Image.Resampling.LANCZOS)
+                    break           
+                
         if args.rotation:
             max_degrees = args.max_degrees 
             attempt_rotation = 0
@@ -308,6 +322,7 @@ def render_objects(backgrounds, all_objects, min_scale, max_scale, args, already
                     o_w, o_h = foreground.size
                     break  
         xmin, xmax, ymin, ymax = get_annotation_from_mask(mask)
+        
         attempt_place = 0
         while True:
             attempt_place +=1
@@ -363,27 +378,21 @@ def render_objects(backgrounds, all_objects, min_scale, max_scale, args, already
                 elif blending_list[i] == 'box':
                     backgrounds[i].paste(foreground, (x, y), Image.fromarray(cv2.blur(PIL2array1C(mask),(3,3))))
 
-            if (annotations is not None):                        
-                xmin = int(max(1,x+xmin))           
-                xmax = int(min(w,x+xmax))           
-                ymin = int(max(1,y+ymin))           
-                ymax = int(min(h,y+ymax))
+            if (annotations is not None):  
+                
+                xmin = int(max(1,xmin))                       
+                ymin = int(max(1,ymin))           
+                xmax = int(min(w,xmax))           
+                ymax = int(min(h,ymax))
 
-                annotation = {
-                    'iscrowd': False,
-                    'image_id': image_id,
-                    'category_id':  str(obj[1]),
-                    'id': annotation_id,
-                    'bbox': [xmin, ymin, xmax-xmin, ymax-ymin],
-                    'area': (xmax-xmin)*(ymax-ymin)
-                }
+                annotation = create_coco_annotation(xmin, ymin, xmax, ymax, image_id, str(obj[1]), annotation_id)
 
                 annotations.append(annotation)
                 annotation_id += 1
 
     return rendered, already_syn, annotations
 
-def render_object_spatial_pair(img, args):
+def render_object_spatial(img, args):
     
     w = args.width
     h = args.height
@@ -420,8 +429,8 @@ def render_object_spatial_pair(img, args):
 
     o_w, o_h = int(scale*orig_w), int(scale*orig_h)
 
-    foreground = foreground.resize((o_w, o_h), Image.ANTIALIAS)
-    mask = mask.resize((o_w, o_h), Image.ANTIALIAS)
+    foreground = foreground.resize((o_w, o_h), Image.Resampling.LANCZOS)
+    mask = mask.resize((o_w, o_h), Image.Resampling.LANCZOS)
                 
     #foreground.show()
     #mask.show()
@@ -441,13 +450,34 @@ def render_object_spatial_pair(img, args):
 
     return foreground, mask
 
-def render_objects_spatial_pair(background, imgA, imgB, relation, args):
+def colorize_image(foregroundA, colorA):
+    if (colorA == "red"):
+        matrix = (2.5, 0, 0, 0,
+                0, .25, 0, 0,
+                0, 0, .25, 0)
+        foregroundA = foregroundA.convert("RGB", matrix)
+    elif (colorA == "green"):
+        matrix = (.25, 0, 0, 0,
+                0, 2.5, 0, 0,
+                0, 0, .25, 0)
+        foregroundA = foregroundA.convert("RGB", matrix)
+
+    elif (colorA == "blue"):
+        matrix = (.25, 0, 0, 0,
+                0, .25, 0, 0,
+                0, 0, 2.5, 0)
+
+        foregroundA = foregroundA.convert("RGB", matrix)
+
+    return foregroundA
+
+def render_objects_spatial_pair(background, imgA, imgB, relation, colorA, colorB, args, image_id, annotations):
 
     w = args.width
     h = args.height
 
-    foregroundA, maskA = render_object_spatial_pair(imgA, args)
-    foregroundB, maskB = render_object_spatial_pair(imgB, args)
+    foregroundA, maskA = render_object_spatial(imgA, args)
+    foregroundB, maskB = render_object_spatial(imgB, args)
 
     if (relation == "left"):
         xA = w*.25
@@ -478,19 +508,74 @@ def render_objects_spatial_pair(background, imgA, imgB, relation, args):
         xB += random.uniform(-args.min_trans*w, args.min_trans*w)
         yB += random.uniform(-args.min_trans*h, args.min_trans*h)
 
-    background.paste(foregroundA, (int(xA-foregroundA.size[0]/2), int(yA-foregroundA.size[1]/2)), Image.fromarray(cv2.GaussianBlur(PIL2array1C(maskA),(5,5),2)))
-    background.paste(foregroundB, (int(xB-foregroundB.size[0]/2), int(yB-foregroundB.size[1]/2)), Image.fromarray(cv2.GaussianBlur(PIL2array1C(maskB),(5,5),2)))
+    foregroundA = colorize_image(foregroundA, colorA)
+    foregroundB = colorize_image(foregroundB, colorB)
+
+    xAmin = int(xA-foregroundA.size[0]/2)
+    yAmin = int(yA-foregroundA.size[1]/2)
+    xAmax = xAmin+foregroundA.size[0]
+    yAmax = yAmin+foregroundA.size[1]
+
+    xBmin = int(xB-foregroundB.size[0]/2)
+    yBmin = int(yB-foregroundB.size[1]/2)
+    xBmax = xBmin+foregroundB.size[0]
+    yBmax = yBmin+foregroundB.size[1]
+
+    background.paste(foregroundA, (xAmin, yAmin), Image.fromarray(cv2.GaussianBlur(PIL2array1C(maskA),(5,5),2)))
+    background.paste(foregroundB, (xBmin, yBmin), Image.fromarray(cv2.GaussianBlur(PIL2array1C(maskB),(5,5),2)))
+
+    if (annotations is not None):
+       
+        xAmin = int(max(1,xAmin))                       
+        yAmin = int(max(1,yAmin))           
+        xAmax = int(min(w,xAmax))           
+        yAmax = int(min(h,yAmax))
+
+        classA = os.path.dirname(imgA).split("\\")[-1]
+
+        annotation_id = 0
+        annotation = create_coco_annotation(xAmin, yAmin, xAmax, yAmax, image_id, classA, annotation_id)
+        annotations.append(annotation)
+       
+        xBmin = int(max(1,xBmin))                       
+        yBmin = int(max(1,yBmin))           
+        xBmax = int(min(w,xBmax))           
+        yBmax = int(min(h,yBmax))
+
+        classB = os.path.dirname(imgB).split("\\")[-1]
+
+        annotation_id = 1
+        annotation = create_coco_annotation(xBmin, yBmin, xBmax, yBmax, image_id, classB, annotation_id)
+        annotations.append(annotation)
+    
+    if (args.draw_boxes):
+        img = ImageDraw.Draw(background)
+
+        lineWidth = 4
+        xAmin = int(xA-foregroundA.size[0]/2)-lineWidth/2
+        yAmin = int(yA-foregroundA.size[1]/2)-lineWidth/2
+        xAmax = xAmin+foregroundA.size[0]+lineWidth
+        yAmax = yAmin+foregroundA.size[1]+lineWidth
+
+        img.rectangle([xAmin, yAmin, xAmax, yAmax], outline ="red", width=4)
+
+        xBmin = int(xB-foregroundB.size[0]/2)-lineWidth/2
+        yBmin = int(yB-foregroundB.size[1]/2)-lineWidth/2
+        xBmax = xBmin+foregroundB.size[0]+lineWidth
+        yBmax = yBmin+foregroundB.size[1]+lineWidth
+
+        img.rectangle([xBmin, yBmin, xBmax, yBmax], outline ="yellow", width=4)
 
     #background.show()
 
     return
 
-def render_objects_spatial(background, imgA, relation, args):
+def render_objects_spatial(background, imgA, relation, args, image_id, annotations):
 
     w = args.width
     h = args.height
 
-    foregroundA, maskA = render_object_spatial_pair(imgA, args)
+    foregroundA, maskA = render_object_spatial(imgA, args)
     
     if (relation == "left"):
         xA = w*.25
@@ -509,9 +594,36 @@ def render_objects_spatial(background, imgA, relation, args):
 
     if args.translation:
         xA += random.uniform(-args.min_trans*w, args.min_trans*w)
-        yA += random.uniform(-args.min_trans*h, args.min_trans*h)
+        yA += random.uniform(-args.min_trans*h, args.min_trans*h)    
 
-    background.paste(foregroundA, (int(xA-foregroundA.size[0]/2), int(yA-foregroundA.size[1]/2)), Image.fromarray(cv2.GaussianBlur(PIL2array1C(maskA),(5,5),2)))
+    xAmin = int(xA-foregroundA.size[0]/2)
+    yAmin = int(yA-foregroundA.size[1]/2)
+    xAmax = xAmin+foregroundA.size[0]
+    yAmax = yAmin+foregroundA.size[1]
+
+    background.paste(foregroundA, (xAmin, yAmin), Image.fromarray(cv2.GaussianBlur(PIL2array1C(maskA),(5,5),2)))
+       
+    xAmin = int(max(1,xAmin))                       
+    yAmin = int(max(1,yAmin))           
+    xAmax = int(min(w,xAmax))           
+    yAmax = int(min(h,yAmax))
+
+    classA = os.path.dirname(imgA).split("\\")[-1]
+
+    annotation_id = 0
+    annotation = create_coco_annotation(xAmin, yAmin, xAmax, yAmax, image_id, classA, annotation_id)
+    annotations.append(annotation)
+
+    if (args.draw_boxes):
+        img = ImageDraw.Draw(background)
+        
+        lineWidth = 4
+        xAmin = int(xA-foregroundA.size[0]/2)-lineWidth/2
+        yAmin = int(yA-foregroundA.size[1]/2)-lineWidth/2
+        xAmax = xAmin+foregroundA.size[0]+lineWidth
+        yAmax = yAmin+foregroundA.size[1]+lineWidth
+
+        img.rectangle([xAmin, yAmin, xAmax, yAmax], outline ="red", width=4)
 
     #background.show()
 
@@ -577,9 +689,42 @@ def create_image_anno(objects, distractor_objects, img_file, bg_file, image_id, 
 
     return img_info, annotations
 
-def create_image_spatial_pairs_anno(imgA, imgB, relation, backgroundImg, path, img_file, args):
+def create_image_spatial_pairs_anno(imgA, imgB, relation, backgroundImg, path, img_file, colorA, colorB, image_id, args):
 
-    print ("Working on %s\%s" % (path, img_file))
+    img_file = os.path.join(path, img_file)
+
+    print ("Working on %s" % img_file)
+
+    blending_list = args.blending_list
+    w = args.width
+    h = args.height
+
+    annotations = []
+
+    #background = Image.new(mode="RGB", size=(w, h), color=(128, 128, 128))
+    background = Image.open(backgroundImg).resize((w, h))
+
+    render_objects_spatial_pair(background, imgA, imgB, relation, colorA, colorB, args, image_id, annotations)
+
+    os.makedirs(os.path.join(args.exp, path), exist_ok=True)
+    img_file_full = os.path.join(args.exp, img_file)
+
+    background.save(img_file_full)
+
+    img_info = {}
+    img_info["license"] = 0
+    img_info["file_name"] = img_file
+    img_info["width"] = w
+    img_info["height"] = h
+    img_info["id"] = image_id
+
+    return img_info, annotations
+
+def create_image_spatial_anno(imgA, relation, backgroundImg, path, img_file, image_id, args):
+
+    img_file = os.path.join(path, img_file)
+
+    print ("Working on %s" % img_file)
 
     blending_list = args.blending_list
     w = args.width
@@ -592,38 +737,21 @@ def create_image_spatial_pairs_anno(imgA, imgB, relation, backgroundImg, path, i
     #background = Image.new(mode="RGB", size=(w, h), color=(128, 128, 128))
     background = Image.open(backgroundImg).resize((w, h))
 
-    render_objects_spatial_pair(background, imgA, imgB, relation, args)
+    render_objects_spatial(background, imgA, relation, args, image_id, annotations)
 
     os.makedirs(os.path.join(args.exp, path), exist_ok=True)
-    img_file = os.path.join(args.exp, path, img_file)
+    img_file_full = os.path.join(args.exp, path, img_file)
 
-    background.save(img_file)
-
-    return
-
-def create_image_spatial_anno(imgA, relation, backgroundImg, path, img_file, args):
-
-    print ("Working on %s\%s" % (path, img_file))
-
-    blending_list = args.blending_list
-    w = args.width
-    h = args.height
-
-    annotations = []
+    background.save(img_file_full)
 
     img_info = {}
+    img_info["license"] = 0
+    img_info["file_name"] = img_file
+    img_info["width"] = w
+    img_info["height"] = h
+    img_info["id"] = image_id
 
-    #background = Image.new(mode="RGB", size=(w, h), color=(128, 128, 128))
-    background = Image.open(backgroundImg).resize((w, h))
-
-    render_objects_spatial(background, imgA, relation, args)
-
-    os.makedirs(os.path.join(args.exp, path), exist_ok=True)
-    img_file = os.path.join(args.exp, path, img_file)
-
-    background.save(img_file)
-
-    return
+    return img_info, annotations
 
 def gen_syn_data(args):
     '''Creates list of objects and distrctor objects to be pasted on what images.
@@ -750,11 +878,15 @@ def gen_syn_data(args):
 
     return results, unique_labels
 
-def get_article(a):
-    if (a[0] in ("a", "e", "i", "o", "u")):
-        return "an " + a 
+def get_article(a, color=None):
+
+    if (color):
+        return ("a " + color + " " + a)
     else:
-        return "a " + a
+        if (a[0] in ("a", "e", "i", "o", "u")):
+            return "an " + a 
+        else:
+            return "a " + a
 
 def get_relation(relation):
     if (relation in ("left", "right")):
@@ -772,12 +904,12 @@ def mirror_relation(relation):
     else:
         return "above"
 
-def create_prompts(a, b, relation, background):
+def create_prompts(a, b, relation, background, colorA=None, colorB=None):
 
     background = background.replace("-", " ").replace("_", " ")
 
-    prompta = get_article(a) + get_relation(relation) + get_article(b) + " in a " + background
-    promptb = get_article(b) + get_relation(mirror_relation(relation)) + get_article(a) + " in a " + background
+    prompta = get_article(a, colorA) + get_relation(relation) + get_article(b, colorB) + " in a " + background
+    promptb = get_article(b, colorB) + get_relation(mirror_relation(relation)) + get_article(a, colorA) + " in a " + background
 
     prompts = [prompta, promptb]
 
@@ -860,45 +992,54 @@ def gen_syn_data_spatial_pairs(args):
 
     if (args.focus_objs):
 
+        unique_labels = args.focus_objs.split(",")
+
         if (args.total_objs>0):
             unique_labels = random.sample(unique_labels,args.total_objs)
 
-        pairs = []
-        for focus_obj in args.focus_objs.split(","):
-            for obj in unique_labels:
-                pairs.append((focus_obj, obj))
+        pairs = list(combinations(unique_labels, 2))
+        pairs = random.sample(pairs,args.total_objs)
+        
+        # pairs = []
+        # for focus_obj in unique_labels:
+        #     for obj in unique_labels:
+        #         pairs.append((focus_obj, obj))
     else:
-
+        
         if (args.total_objs>0):
-            unique_labelsA = random.sample(unique_labels,args.total_objs)
-            unique_labelsB = random.sample(list(set(unique_labels).difference(set(unique_labelsA))),args.total_objs)
+            # unique_labelsA = random.sample(unique_labels,args.total_objs)
+            # unique_labelsB = random.sample(list(set(unique_labels).difference(set(unique_labelsA))),args.total_objs)
 
-            pairs = []
-            for objA in unique_labelsA:
-                for objB in unique_labelsB:
+            # pairs = []
+            # for objA in unique_labelsA:
+            #     for objB in unique_labelsB:
 
-                    pairs.append((objA, objB))
+            #         pairs.append((objA, objB))
+
+            pairs = list(combinations(unique_labels, 2))
+            pairs = random.sample(pairs,args.total_objs)
+
         else:
             pairs = list(combinations(unique_labels, 2))
 
     relations = ["left", "right", "above", "below"]
+    colors = ["red", "green", "blue"]
 
     obj_rels = []
 
     params_list = []
 
-    #pick classes of 
-    backgrounds = random.sample(unique_background_labels,args.total_backgrounds)
-
     tups = []
     for pair in pairs:
+        #pick classes of backgrounds
+        backgrounds = random.sample(unique_background_labels,args.total_backgrounds)        
         for background in backgrounds:
             for relation in relations:
                 tups.append(pair + (background, relation))
 
     print ("Number of output images : %d" % (len(tups)*args.total_num))
 
-    for tup in tups:
+    for idx, tup in enumerate(tups):
 
         #classes for A, B, and background
         A = tup[0]
@@ -930,12 +1071,26 @@ def gen_syn_data_spatial_pairs(args):
             backgroundImg =  backgroundImgs[i]
 
             path = ("val\%s_%s\%s\%s" if args.val else "train\%s_%s\%s\%s") % (A, B, relation, background)
-            img_file = '%s_%s_%s.jpg' % (os.path.splitext(os.path.basename(imgA))[0], os.path.splitext(os.path.basename(imgB))[0], os.path.splitext(os.path.basename(backgroundImg))[0])
+            
+            if (args.colors):
 
-            params = (imgA, imgB, relation, backgroundImg, path, img_file)
-            params_list.append(params)           
+                colorA = random.sample(colors, 1)[0]
+                colorB = random.sample(colors, 1)[0]
 
-            prompts = create_prompts(A, B, relation, background)
+                img_file = '%s_%s_%s_%s_%s.jpg' % (colorA, os.path.splitext(os.path.basename(imgA))[0], colorB, os.path.splitext(os.path.basename(imgB))[0], os.path.splitext(os.path.basename(backgroundImg))[0])
+
+                params = (imgA, imgB, relation, backgroundImg, path, img_file, colorA, colorB, idx)
+                params_list.append(params)           
+
+                prompts = create_prompts(A, B, relation, background, colorA, colorB)
+
+            else:
+                img_file = '%s_%s_%s.jpg' % (os.path.splitext(os.path.basename(imgA))[0], os.path.splitext(os.path.basename(imgB))[0], os.path.splitext(os.path.basename(backgroundImg))[0])
+
+                params = (imgA, imgB, relation, backgroundImg, path, img_file, None, None, idx)
+                params_list.append(params)           
+
+                prompts = create_prompts(A, B, relation, background)
 
             output_file = os.path.join(path, img_file)
             obj_rels.append([output_file] + prompts)
@@ -952,7 +1107,7 @@ def gen_syn_data_spatial_pairs(args):
 
         p = get_context("spawn").Pool(args.workers, init_worker)
         try:
-            p.map(partial_func, params_list)
+            results = p.map(partial_func, params_list)
         except KeyboardInterrupt:
             print ("....\nCaught KeyboardInterrupt, terminating workers")
             p.terminate()
@@ -962,9 +1117,10 @@ def gen_syn_data_spatial_pairs(args):
     else:
         results = []
         for object in params_list:
-            create_image_spatial_pairs_anno(*object, args=args)
+            img_info, annotations = create_image_spatial_pairs_anno(*object, args=args)
+            results.append([img_info, annotations])
 
-    return
+    return results, unique_labels
 
 def gen_syn_data_spatial(args):
     '''Creates list of objects and distrctor objects to be pasted on what images.
@@ -1033,8 +1189,8 @@ def gen_syn_data_spatial(args):
     #unique_labels = random.sample(unique_labels,10)
     #print ("Using number of classes : %d" % len(unique_labels))
 
-    if (args.total_other_objs>0):
-        unique_labels = random.sample(unique_labels,args.total_other_objs)
+    if (args.total_objs>0):
+        unique_labels = random.sample(unique_labels,args.total_objs)
 
     if (args.focus_objs):
         pairs = args.focus_objs.split(",")
@@ -1048,17 +1204,18 @@ def gen_syn_data_spatial(args):
     params_list = []
 
     #pick classes of 
-    backgrounds = random.sample(unique_background_labels,args.total_backgrounds)
+ #   backgrounds = random.sample(unique_background_labels,args.total_backgrounds)
 
     tups = []
     for pair in pairs:
+        backgrounds = random.sample(unique_background_labels,args.total_backgrounds)
         for background in backgrounds:
             for relation in relations:
                 tups.append((pair, background, relation))
 
     print ("Number of output images : %d" % (len(tups)*args.total_num))
 
-    for tup in tups:
+    for idx, tup in enumerate(tups):
 
         #classes for A, B, and background
         A = tup[0]
@@ -1075,7 +1232,11 @@ def gen_syn_data_spatial(args):
             imgAs = random.choices(labels_to_images[A], k=args.total_num)
            
         #pick instances of background
-        backgroundImgs = random.sample(background_labels_to_images[background],args.total_num)
+
+        if (args.total_num > len(background_labels_to_images[background])):
+            backgroundImgs = np.random.choice(background_labels_to_images[background],args.total_num, replace=True)
+        else:
+            backgroundImgs = random.sample(background_labels_to_images[background],args.total_num)
 
         for i in range(args.total_num):
 
@@ -1085,7 +1246,7 @@ def gen_syn_data_spatial(args):
             path = ("val\%s\%s\%s" if args.val else "train\%s\%s\%s") % (A, relation, background)
             img_file = '%s_%s.jpg' % (os.path.splitext(os.path.basename(imgA))[0], os.path.splitext(os.path.basename(backgroundImg))[0])
 
-            params = (imgA, relation, backgroundImg, path, img_file)
+            params = (imgA, relation, backgroundImg, path, img_file, idx)
             params_list.append(params)           
 
             prompt = create_prompt(A, relation, background)
@@ -1114,9 +1275,10 @@ def gen_syn_data_spatial(args):
     else:
         results = []
         for object in params_list:
-            create_image_spatial_anno(*object, args=args)
+            img_info, annotations = create_image_spatial_anno(*object, args=args)
+            results.append([img_info, annotations])
 
-    return
+    return results, unique_labels
 
 def init_worker():
     '''
@@ -1124,12 +1286,10 @@ def init_worker():
     '''
     signal.signal(signal.SIGINT, signal.SIG_IGN)
  
-def generate_synthetic_dataset(args):
+def write_coco(results, unique_labels):
     ''' Generate synthetic dataset according to given args
     '''  
-    
-    results, unique_labels = gen_syn_data(args)  
-
+   
     categories = []
     label_to_id = {}
 
@@ -1166,6 +1326,14 @@ def generate_synthetic_dataset(args):
         json_file.write(json.dumps(my_dict))
 
     print(">> complete. find coco json here: ", output_file_path)
+
+def generate_synthetic_dataset(args):
+    ''' Generate synthetic dataset according to given args
+    '''  
+    
+    results, unique_labels = gen_syn_data(args)  
+
+    write_coco(results, unique_labels)
 
 def coco_from_imagefolder(args):
     
@@ -1430,13 +1598,11 @@ def parse_args():
       help="The directory where images and annotation lists will be created.")
     
     parser.add_argument("--scale",
-      help="Add scale augmentation.Default is to add scale augmentation.", action="store_false")
+      help="Add scale augmentation.Default is not to add scale augmentation.", action="store_true")
     parser.add_argument("--rotation",
-      help="Add rotation augmentation.Default is to add rotation augmentation.", action="store_false")
+      help="Add rotation augmentation.Default is not to add rotation augmentation.", action="store_true")
     parser.add_argument("--translation",
-      help="Add rotation augmentation.Default is to add translate augmentation.", action="store_false")
-    parser.add_argument("--total_num",
-      help="Number of times each image will be in dataset", default=2, type=int)
+      help="Add rotation augmentation.Default is not to add translate augmentation.", action="store_true")
     parser.add_argument("--dontocclude",
       help="Add objects without occlusion. Default is to produce occlusions", action="store_true")
     parser.add_argument("--add_distractors",
@@ -1499,11 +1665,16 @@ def parse_args():
 
     parser.add_argument("--focus_objs", default="", type=str)
 
-    parser.add_argument("--total_backgrounds", default=1, type=int)
+    parser.add_argument("--total_backgrounds", default=4, type=int)
 
-    parser.add_argument("--total_objs", default=10, type=int)
+    parser.add_argument("--total_num",
+      help="Number of times each image will be in dataset", default=4, type=int)
+
+    parser.add_argument("--total_objs", default=20, type=int)
 
     parser.add_argument("--colors", action="store_true")
+
+    parser.add_argument("--draw_boxes", action="store_true")
 
     parser.add_argument("--val", action="store_true")
 
@@ -1541,9 +1712,11 @@ if __name__ == '__main__':
     elif (args.create_json):
         coco_from_imagefolder(args)
     if (args.spatial_pairs):
-        gen_syn_data_spatial_pairs(args) 
+        results, unique_labels = gen_syn_data_spatial_pairs(args)
+        write_coco(results, unique_labels)
     elif (args.spatial):
-        gen_syn_data_spatial(args) 
+        results, unique_labels = gen_syn_data_spatial(args) 
+        write_coco(results, unique_labels)
     else:
         if (args.stats_file):
             print("using stats")
