@@ -740,7 +740,7 @@ def create_image_spatial_anno(imgA, relation, backgroundImg, path, img_file, ima
     render_objects_spatial(background, imgA, relation, args, image_id, annotations)
 
     os.makedirs(os.path.join(args.exp, path), exist_ok=True)
-    img_file_full = os.path.join(args.exp, path, img_file)
+    img_file_full = os.path.join(args.exp, img_file)
 
     background.save(img_file_full)
 
