@@ -1265,7 +1265,7 @@ def gen_syn_data_spatial(args):
 
         p = get_context("spawn").Pool(args.workers, init_worker)
         try:
-            p.map(partial_func, params_list)
+            results = p.map(partial_func, params_list)
         except KeyboardInterrupt:
             print ("....\nCaught KeyboardInterrupt, terminating workers")
             p.terminate()
