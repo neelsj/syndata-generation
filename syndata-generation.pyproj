@@ -4,7 +4,7 @@
     <SchemaVersion>2.0</SchemaVersion>
     <ProjectGuid>ef5a706e-110a-430a-a3cc-e18d3b062a6d</ProjectGuid>
     <ProjectHome>.</ProjectHome>
-    <StartupFile>dataset_generator.py</StartupFile>
+    <StartupFile>pick_good_coco_objs.py</StartupFile>
     <SearchPath>
     </SearchPath>
     <WorkingDirectory>.</WorkingDirectory>
@@ -12,8 +12,8 @@
     <Name>syndata-generation</Name>
     <RootNamespace>syndata-generation</RootNamespace>
     <LaunchProvider>Standard Python launcher</LaunchProvider>
-    <CommandLineArguments>E:\Source\EffortlessCVSystem\Data\coco_objects_good\ --background_dir E:\Research\Images\Places365\ --exp E:\Source\EffortlessCVSystem\Data\coco_spatial_single_detection --dontocclude  --val  --scale --rotation --translation --workers 10 --spatial --focus_objs "banana,baseball glove,bed,boat,book,bottle,broccoli,car,chair,couch,hair drier,horse,mouse,orange,potted plant,sheep,sink,toilet,wine glass,zebra"</CommandLineArguments>
-    <EnableNativeCodeDebugging>False</EnableNativeCodeDebugging>
+    <CommandLineArguments>E:\Source\EffortlessCVSystem\Data\coco_objects_good\ --background_dir E:\Research\Images\Places365\ --exp E:\Source\EffortlessCVSystem\Data\coco_spatial_pairs_detection --dontocclude  --val  --scale --rotation --translation --workers 10 --spatial_pairs --focus_objs "banana,baseball glove,bed,boat,book,bottle,broccoli,car,chair,couch,hair drier,horse,mouse,orange,potted plant,sheep,sink,toilet,wine glass,zebra"</CommandLineArguments>
+    <EnableNativeCodeDebugging>True</EnableNativeCodeDebugging>
     <InterpreterId>Global|VisualStudio|open_clip</InterpreterId>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
@@ -38,6 +38,7 @@
     <Compile Include="objectnet_to_imagenet.py">
       <SubType>Code</SubType>
     </Compile>
+    <Compile Include="pick_good_coco_objs.py" />
     <Compile Include="segment.py" />
   </ItemGroup>
   <ItemGroup>

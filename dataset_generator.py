@@ -610,9 +610,10 @@ def render_objects_spatial(background, imgA, relation, args, image_id, annotatio
 
     classA = os.path.dirname(imgA).split("\\")[-1]
 
-    annotation_id = 0
-    annotation = create_coco_annotation(xAmin, yAmin, xAmax, yAmax, image_id, classA, annotation_id)
-    annotations.append(annotation)
+    if (annotations is not None):
+        annotation_id = 0
+        annotation = create_coco_annotation(xAmin, yAmin, xAmax, yAmax, image_id, classA, annotation_id)
+        annotations.append(annotation)
 
     if (args.draw_boxes):
         img = ImageDraw.Draw(background)
@@ -1079,7 +1080,7 @@ def gen_syn_data_spatial_pairs(args):
 
                 img_file = '%s_%s_%s_%s_%s.jpg' % (colorA, os.path.splitext(os.path.basename(imgA))[0], colorB, os.path.splitext(os.path.basename(imgB))[0], os.path.splitext(os.path.basename(backgroundImg))[0])
 
-                params = (imgA, imgB, relation, backgroundImg, path, img_file, colorA, colorB, idx)
+                params = (imgA, imgB, relation, backgroundImg, path, img_file, colorA, colorB, args.total_num*idx+i)
                 params_list.append(params)           
 
                 prompts = create_prompts(A, B, relation, background, colorA, colorB)
@@ -1087,7 +1088,7 @@ def gen_syn_data_spatial_pairs(args):
             else:
                 img_file = '%s_%s_%s.jpg' % (os.path.splitext(os.path.basename(imgA))[0], os.path.splitext(os.path.basename(imgB))[0], os.path.splitext(os.path.basename(backgroundImg))[0])
 
-                params = (imgA, imgB, relation, backgroundImg, path, img_file, None, None, idx)
+                params = (imgA, imgB, relation, backgroundImg, path, img_file, None, None, args.total_num*idx+i)
                 params_list.append(params)           
 
                 prompts = create_prompts(A, B, relation, background)
@@ -1246,7 +1247,7 @@ def gen_syn_data_spatial(args):
             path = ("val\%s\%s\%s" if args.val else "train\%s\%s\%s") % (A, relation, background)
             img_file = '%s_%s.jpg' % (os.path.splitext(os.path.basename(imgA))[0], os.path.splitext(os.path.basename(backgroundImg))[0])
 
-            params = (imgA, relation, backgroundImg, path, img_file, idx)
+            params = (imgA, relation, backgroundImg, path, img_file, args.total_num*idx+i)
             params_list.append(params)           
 
             prompt = create_prompt(A, relation, background)
@@ -1728,81 +1729,6 @@ if __name__ == '__main__':
 
         generate_synthetic_dataset(args)
 
-    #img_list = get_list_of_images(args.root) 
-
-    #for img in img_list:
-    #    print(img)
-    #    mask_file =  get_mask_file(img)
-    #    mask = Image.open(mask_file)
-    #    mask = Image.fromarray(255-PIL2array1C(mask)).convert('1')
-
-    #    w, h = mask.size
-
-    #    mask = np.array(mask)
-    #    avg = np.mean(mask)
-    #    b = 4
-    #    mw = int(w*.25)
-    #    mh = int(h*.25)
-    #    border = np.sum(mask[0:b,:]) + np.sum(mask[-b:,:]) + np.sum(mask[:,0:b]) + np.sum(mask[:,-b:])
-    #    center = np.mean(mask[int(h/2)-mh:int(h/2)+mh,int(w/2)-mw:int(w/2)+mw])
-
-    #    if not (avg < .1 or border > 0 or center < .1):
-
-    #        img_target = img.replace(args.root, args.exp)
-    #        mask_file_target = mask_file.replace(args.root, args.exp)
-
-    #        if (not os.path.exists(os.path.dirname(img_target))):
-    #            os.makedirs(os.path.dirname(img_target))
-
-    #        shutil.copyfile(img, img_target)
-    #        shutil.copyfile(mask_file, mask_file_target)
-            
-    #img_list = get_list_of_images(args.exp) 
-    #labels = get_labels(img_list)
-    #unique_labels = sorted(set(labels))
-
-    #unique_labels_count = {}
-    #unique_labels_files = {}
-    #for label in unique_labels:
-    #    unique_labels_count[label] = 0
-    #    unique_labels_files[label] = []
-
-    #for i, img in enumerate(img_list):
-    #    label = labels[i]
-    #    unique_labels_count[label] += 1
-    #    unique_labels_files[label].append(img)
-        
-    #train = []
-    #val = []
-
-    #for label in unique_labels:
-    #    print("%s:\t%d" % (label, unique_labels_count[label]))
-    #    files = unique_labels_files[label]
-    #    random.shuffle(files)
-
-    #    s = max(int(len(files)*.2),2)
-    #    v = sorted(files[:s])
-    #    t = sorted(files[s:])
-
-    #    val += v
-    #    train += t
-
-    #with open(os.path.join(args.exp, 'val.txt'), "w") as fd:
-    #    for v in val:
-    #        fd.write(v.replace(args.exp,""))
-    #        fd.write("\n")
-    
-    #with open(os.path.join(args.exp, 'train.txt'), "w") as fd:
-    #    for t in train:
-    #        fd.write(t.replace(args.exp,""))
-    #        fd.write("\n")
-
-    #change_fgvc_classes("E:/Source/EffortlessCVData/planes/objects_benchmark/test.json", "E:/Source/EffortlessCVData/planes/annotations/trainval.json", "E:/Source/EffortlessCVData/planes/annotations/trainval_renumbered_classes.json")
-    #change_fgvc_classes("E:/Source/EffortlessCVData/planes/objects_benchmark/test.json", "E:/Source/EffortlessCVData/planes/annotations/test.json", "E:/Source/EffortlessCVData/planes/annotations/test_renumbered_classes.json")
-    #change_fgvc_classes("E:/Source/EffortlessCVData/planes/objects_benchmark/test.json", "E:/Source/EffortlessCVData/planes/train_bing50/annotations2.json", "E:/Source/EffortlessCVData/planes/train_bing50/annotations_renumbered_classes.json")
-
-    #displayCoco("E:/Research/Images/FineGrained/fgvc-aircraft-2013b/data/images", "E:/Source/EffortlessCVData/planes/annotations/test.json")
-    #displayCoco("E:/Research/Images/FineGrained/fgvc-aircraft-2013b/data/images", "E:/Source/EffortlessCVData/planes/annotations/test_renumbered_classes.json")
-    #displayCoco("E:/Source/EffortlessCVData/planes/objects_benchmark", "E:/Source/EffortlessCVData/planes/objects_benchmark/test.json")
+    displayCoco(args.exp, os.path.join(args.exp, "coco_instances.json"))
     
     #image_thumbnails("E:/Source/EffortlessCVData/planes/objects_benchmark", 1, max_w=6, display_label=True)
