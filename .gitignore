@@ -100,3 +100,6 @@ ENV/
 /.vs/
 /demo_data_dir/
 /output_dir/
+*.pickle
+/~/nltk_data
+*.pth
