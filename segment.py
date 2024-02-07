@@ -3,6 +3,7 @@ import os
 from datetime import datetime
 import json
 import matplotlib.pyplot as plt
+from torchvision.models import detection
 from tqdm import tqdm
 
 import torch
@@ -32,6 +33,53 @@ COCO_LICENSES = [{
 }]
 
 model = None
+inferencer = None
+predictor = None
+
+from mmdet.apis import DetInferencer
+
+from segment_anything import SamPredictor, sam_model_registry
+
+def create_mask_open_world(input_image, category, keepBiggest=True):
+    global predictor
+    global inferencer
+
+    try:
+
+        if (predictor is None):    
+            sam_checkpoint = "E:/Source/EffortlessCVSystem/Libs/syndata-generation/sam_vit_h_4b8939.pth"
+            model_type = "vit_h"
+            device = "cuda"
+
+            sam = sam_model_registry[model_type](checkpoint=sam_checkpoint)
+            sam.to(device=device)
+
+            predictor = SamPredictor(sam)
+    
+        if (inferencer is None):    
+            # Initialize the DetInferencer
+
+            checkpoint = 'E:/Source/mmdetection/glip_tiny_a_mmdet-b3654169.pth'
+            inferencer = DetInferencer(model='glip_atss_swin-t_a_fpn_dyhead_pretrain_obj365', weights=checkpoint)
+
+        # Get detection
+        input_image = np.array(input_image.convert("RGB"))
+        results = inferencer(input_image, texts=category.replace(" ", "_"), show=False)
+
+        detections = results["predictions"][0]
+
+        input_box = np.array(detections['bboxes'][0])
+
+        predictor.set_image(input_image)
+        masks, scores, logits = predictor.predict(box=input_box[None, :], multimask_output=True)
+
+        mask = masks[np.argmax(scores)].astype(float)
+        mask = check_mask(mask)
+    except:
+        return None
+    
+    return mask
+
 
 def create_mask(input_image):
 
@@ -66,16 +114,6 @@ def create_mask(input_image):
     mask = np.uint8(255*(output_predictions.cpu().numpy() > 0))
     #mask = output_predictions.byte().cpu().numpy()
 
-    return mask
-
-def check_mask(mask):    
-
-    #plt.imshow(mask)
-    #plt.waitforbuttonpress()
-
-    #margin = 5
-    #mask = None if (np.mean(mask) < .05 or np.mean(mask) > .95 or np.max(mask[0:margin,:]) == 1 or np.max(mask[:,0:margin]) == 1 or np.max(mask[-margin:,:]) == 1 or np.max(mask[:,-margin:])) else mask
-    mask = None if (np.mean(mask) < .05 or np.mean(mask) > .95) else mask
     return mask
 
 def create_mask_coco(input_image, category, keepBiggest=True):
@@ -137,6 +175,16 @@ def create_mask_coco(input_image, category, keepBiggest=True):
 
         mask = check_mask(mask)
 
+    return mask
+
+def check_mask(mask):    
+
+    #plt.imshow(mask)
+    #plt.waitforbuttonpress()
+
+    #margin = 5
+    #mask = None if (np.mean(mask) < .05 or np.mean(mask) > .95 or np.min(mask[0:margin,:]) == 0 or np.min(mask[:,0:margin]) == 0 or np.min(mask[-margin:,:]) == 0 or np.min(mask[:,-margin:]) == 0) else mask
+    mask = None if (np.mean(mask) < .05 or np.mean(mask) > .95) else mask
     return mask
 
 def create_sub_mask_annotation(sub_mask, image_id, category_id, annotation_id, is_crowd, bbox=None):
@@ -233,7 +281,8 @@ def generate_masks(data_dir, background=False, coco=False):
             if (coco):
                 mask = create_mask_coco(image, dir)
             else:
-                mask = create_mask(image)
+                #mask = create_mask(image)
+                mask = create_mask_open_world(image, dir)
 
             if (mask is not None):
                 if (background):
@@ -322,7 +371,7 @@ def generate_masks(data_dir, background=False, coco=False):
     coco["annotations"] = annotations
 
     # TODO: specify coco file locaiton 
-    output_file_path = os.path.join(data_dir,"../", "coco_instances.json")
+    output_file_path = os.path.join(data_dir, "coco_instances.json")
     with open(output_file_path, 'w+') as json_file:
         json_file.write(json.dumps(coco))
 

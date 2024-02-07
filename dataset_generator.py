@@ -936,21 +936,21 @@ def gen_syn_data_spatial_pairs(args):
     w = args.width
     h = args.height   
 
-    #img_list = get_list_of_images(args.root) 
+    img_list = get_list_of_images(args.root) 
 
-    if (args.val):
-        with open(os.path.join(args.root, "val.txt")) as f:
-            img_list = f.readlines()
-    else:
-        with open(os.path.join(args.root, "train.txt")) as f:
-            img_list = f.readlines()
+    # if (args.val):
+    #     with open(os.path.join(args.root, "val.txt")) as f:
+    #         img_list = f.readlines()
+    # else:
+    #     with open(os.path.join(args.root, "train.txt")) as f:
+    #         img_list = f.readlines()
 
     img_list = [os.path.join(args.root, b.strip()) for b in img_list]
 
     labels = get_labels(img_list)
     unique_labels = sorted(set(labels))
 
-    #background_list = get_list_of_images(args.background_dir) 
+    # background_list = get_list_of_images(args.background_dir) 
 
     if (args.val):
         with open(args.background_dir + "val.txt") as f:
@@ -1135,21 +1135,21 @@ def gen_syn_data_spatial(args):
     w = args.width
     h = args.height   
 
-    #img_list = get_list_of_images(args.root) 
+    img_list = get_list_of_images(args.root) 
 
-    if (args.val):
-        with open(os.path.join(args.root, "val.txt")) as f:
-            img_list = f.readlines()
-    else:
-        with open(os.path.join(args.root, "train.txt")) as f:
-            img_list = f.readlines()
+    # if (args.val):
+    #     with open(os.path.join(args.root, "val.txt")) as f:
+    #         img_list = f.readlines()
+    # else:
+    #     with open(os.path.join(args.root, "train.txt")) as f:
+    #         img_list = f.readlines()
 
     img_list = [os.path.join(args.root, b.strip()) for b in img_list]
 
     labels = get_labels(img_list)
     unique_labels = sorted(set(labels))
 
-    #background_list = get_list_of_images(args.background_dir) 
+    # background_list = get_list_of_images(args.background_dir) 
 
     if (args.val):
         with open(args.background_dir + "val.txt") as f:
@@ -1700,6 +1700,9 @@ COCO_LICENSES = [{
 if __name__ == '__main__':
     args = parse_args()
     args.stats = None
+
+    if (not hasattr(args, 'exp')):
+        args.exp = args.root
 
     if not os.path.exists(args.exp):
         os.makedirs(args.exp) 
